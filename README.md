@@ -22,6 +22,9 @@ This repository is a practical, interview-grade learning track for distributed s
 1. Saga
 - Doc: `docs/saga.md`
 - Run: `javac examples/saga/SagaDemo.java && java -cp examples/saga SagaDemo`
+- Advanced orchestrator doc (sync vs async): `docs/saga-orchestrator-sync-vs-async.md`
+- Advanced run: `javac examples/saga/SagaOrchestratorModesDemo.java && java -cp examples/saga SagaOrchestratorModesDemo`
+- Production-style reference examples (non-executable): `docs/saga-prod-examples-sync-async.md`
 
 2. Transactional Outbox
 - Doc: `docs/outbox.md`

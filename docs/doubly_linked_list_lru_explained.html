@@ -1,0 +1,391 @@
+
+<style>
+  h2.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}
+  .step-dot{width:10px;height:10px;border-radius:50%;background:var(--color-border-secondary);cursor:pointer;transition:background .2s}
+  .step-dot.active{background:var(--color-text-primary)}
+  @keyframes pop{0%{transform:scale(.8);opacity:0}60%{transform:scale(1.08)}100%{transform:scale(1);opacity:1}}
+  .pop{animation:pop .3s ease-out both}
+</style>
+<h2 class="sr-only">How the doubly linked list works in an LRU cache — interactive step-by-step diagram</h2>
+
+<div id="desc" style="min-height:56px;padding:12px 0 8px;font-size:14px;color:var(--color-text-primary);line-height:1.6"></div>
+
+<div style="position:relative;width:100%;overflow:hidden">
+  <svg id="viz" width="100%" viewBox="0 0 680 220" role="img">
+    <title>Doubly linked list diagram</title>
+    <defs>
+      <marker id="ar" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+      </marker>
+    </defs>
+    <g id="canvas"></g>
+  </svg>
+</div>
+
+<div style="display:flex;align-items:center;justify-content:space-between;margin:12px 0 0">
+  <button id="prev-btn" onclick="move(-1)" style="font-size:13px;padding:6px 16px">← Prev</button>
+  <div id="dots" style="display:flex;gap:8px;align-items:center"></div>
+  <button id="next-btn" onclick="move(1)" style="font-size:13px;padding:6px 16px">Next →</button>
+</div>
+
+<script>
+const NS="http://www.w3.org/2000/svg";
+const canvas=document.getElementById("canvas");
+const descEl=document.getElementById("desc");
+const dotsEl=document.getElementById("dots");
+
+// Color constants
+const COL_HEAD  = {fill:"var(--color-background-secondary)", stroke:"var(--color-border-primary)", text:"var(--color-text-secondary)"};
+const COL_TAIL  = COL_HEAD;
+const COL_NODE  = {fill:"var(--color-background-info)", stroke:"var(--color-border-info)", text:"var(--color-text-info)"};
+const COL_NEW   = {fill:"var(--color-background-success)", stroke:"var(--color-border-success)", text:"var(--color-text-success)"};
+const COL_EVICT = {fill:"var(--color-background-danger)", stroke:"var(--color-border-danger)", text:"var(--color-text-danger)"};
+const COL_MOVED = {fill:"var(--color-background-warning)", stroke:"var(--color-border-warning)", text:"var(--color-text-warning)"};
+
+// Each step: list of nodes to draw + description
+// Nodes: {id, label, sub, col}, arrows connect left→right as doubly linked
+const steps = [
+  {
+    desc: "<b>Structure:</b> The list has two sentinel nodes — a <code>head</code> and a <code>tail</code> — that never hold real data. Real nodes live <em>between</em> them. Every node has a <code>prev</code> and <code>next</code> pointer, forming a doubly linked chain.",
+    nodes: [
+      {id:"H", label:"HEAD", sub:"sentinel", col:COL_HEAD},
+      {id:"T", label:"TAIL", sub:"sentinel", col:COL_TAIL},
+    ]
+  },
+  {
+    desc: "<b>PUT 1, 2, 3</b> — Each new node is inserted right after <code>HEAD</code>. The most-recently used (MRU) node is always at the front, and the least-recently used (LRU) is just before <code>TAIL</code>.",
+    nodes: [
+      {id:"H",  label:"HEAD", sub:"", col:COL_HEAD},
+      {id:"n3", label:"3=C",  sub:"MRU", col:COL_NEW},
+      {id:"n2", label:"2=B",  sub:"", col:COL_NODE},
+      {id:"n1", label:"1=A",  sub:"LRU", col:COL_NODE},
+      {id:"T",  label:"TAIL", sub:"", col:COL_TAIL},
+    ]
+  },
+  {
+    desc: "<b>GET 2</b> — A cache hit! Node <code>2=B</code> is moved to the front (after HEAD). To do this: (1) unlink it from its current position, then (2) relink it after HEAD. The two-pointer structure makes both operations O(1).",
+    nodes: [
+      {id:"H",  label:"HEAD", sub:"", col:COL_HEAD},
+      {id:"n2", label:"2=B",  sub:"MRU ↑ moved", col:COL_MOVED},
+      {id:"n3", label:"3=C",  sub:"", col:COL_NODE},
+      {id:"n1", label:"1=A",  sub:"LRU", col:COL_NODE},
+      {id:"T",  label:"TAIL", sub:"", col:COL_TAIL},
+    ]
+  },
+  {
+    desc: "<b>removeNode(node)</b> — Unlinking a node means patching its neighbours together. Node's <code>prev.next</code> jumps over it to <code>node.next</code>, and <code>node.next.prev</code> jumps back over it to <code>node.prev</code>. Then both pointers are nulled out.",
+    nodes: null,
+    special: "remove"
+  },
+  {
+    desc: "<b>addAfterHead(node)</b> — Inserting after HEAD: (1) node.next = head.next, (2) node.prev = head, (3) head.next.prev = node, (4) head.next = node. Four pointer assignments, regardless of list size.",
+    nodes: null,
+    special: "insert"
+  },
+  {
+    desc: "<b>PUT 6=F (capacity full, evict LRU)</b> — Size exceeds capacity. The LRU node is always <code>tail.prev</code> — here that's <code>1=A</code>. It is removed in O(1) and deleted from the HashMap. New node <code>6=F</code> goes to the front.",
+    nodes: [
+      {id:"H",  label:"HEAD", sub:"", col:COL_HEAD},
+      {id:"n6", label:"6=F",  sub:"MRU (new)", col:COL_NEW},
+      {id:"n2", label:"2=B",  sub:"", col:COL_NODE},
+      {id:"n3", label:"3=C",  sub:"", col:COL_NODE},
+      {id:"n1", label:"1=A",  sub:"evicted ✕", col:COL_EVICT},
+      {id:"T",  label:"TAIL", sub:"", col:COL_TAIL},
+    ],
+    strikethrough: "n1"
+  },
+  {
+    desc: "<b>Why doubly linked?</b> A singly linked list can only traverse forward. To remove a node you'd need to scan from HEAD each time — O(n). With <code>prev</code> pointers, every node already knows its predecessor, so removal is always O(1). Combined with the HashMap for O(1) lookup, both GET and PUT are O(1).",
+    nodes: [
+      {id:"H",  label:"HEAD", sub:"", col:COL_HEAD},
+      {id:"n6", label:"6=F",  sub:"MRU", col:COL_NODE},
+      {id:"n2", label:"2=B",  sub:"", col:COL_NODE},
+      {id:"n3", label:"3=C",  sub:"", col:COL_NODE},
+      {id:"T",  label:"TAIL", sub:"LRU←tail.prev", col:COL_TAIL},
+    ]
+  },
+];
+
+let cur = 0;
+
+function svgEl(tag, attrs){
+  const el = document.createElementNS(NS, tag);
+  for(const [k,v] of Object.entries(attrs)) el.setAttribute(k, v);
+  return el;
+}
+
+function drawNodes(nodes, strikethrough){
+  canvas.innerHTML="";
+  if(!nodes) return;
+  const n = nodes.length;
+  const W=680, pad=30;
+  const boxW = Math.min(110, Math.floor((W - pad*2 - (n-1)*20) / n));
+  const boxH = 64, rx=8;
+  const totalW = n*boxW + (n-1)*20;
+  const startX = (W - totalW)/2;
+  const y = 78;
+
+  nodes.forEach((nd, i)=>{
+    const x = startX + i*(boxW+20);
+    const cx = x + boxW/2;
+    const col = nd.col;
+    const strike = nd.id === strikethrough;
+
+    const g = svgEl("g",{class:"pop"});
+    g.style.animationDelay = (i*40)+"ms";
+
+    const rect = svgEl("rect",{x, y, width:boxW, height:boxH, rx,
+      fill:col.fill, stroke:col.stroke, "stroke-width":"1"});
+    g.appendChild(rect);
+
+    const label = svgEl("text",{
+      x:cx, y: nd.sub ? y+22 : y+boxH/2,
+      "text-anchor":"middle","dominant-baseline":"central",
+      "font-size":"13","font-weight":"500",fill:col.text,
+      "font-family":"var(--font-sans)"
+    });
+    label.textContent = nd.label;
+    if(strike){
+      label.setAttribute("text-decoration","line-through");
+      label.setAttribute("opacity","0.5");
+    }
+    g.appendChild(label);
+
+    if(nd.sub){
+      const sub = svgEl("text",{
+        x:cx, y:y+44, "text-anchor":"middle","dominant-baseline":"central",
+        "font-size":"11",fill:col.text,opacity:"0.75",
+        "font-family":"var(--font-sans)"
+      });
+      sub.textContent = nd.sub;
+      g.appendChild(sub);
+    }
+
+    canvas.appendChild(g);
+
+    // Arrows between nodes
+    if(i < n-1){
+      const nx = startX + (i+1)*(boxW+20);
+      const gapMid = x+boxW+10;
+      // next arrow (top)
+      const a1 = svgEl("line",{
+        x1:x+boxW, y1:y+20, x2:nx, y2:y+20,
+        stroke:"var(--color-border-primary)","stroke-width":"1",
+        "marker-end":"url(#ar)"
+      });
+      // prev arrow (bottom)
+      const a2 = svgEl("line",{
+        x1:nx, y1:y+44, x2:x+boxW+2, y2:y+44,
+        stroke:"var(--color-border-secondary)","stroke-width":"1",
+        "stroke-dasharray":"3 2",
+        "marker-end":"url(#ar)"
+      });
+      canvas.insertBefore(a1, canvas.firstChild);
+      canvas.insertBefore(a2, canvas.firstChild);
+    }
+  });
+
+  // Legend
+  const leg = svgEl("g",{});
+  const items=[
+    {col:COL_NODE, label:"normal node"},
+    {col:COL_NEW,  label:"new / inserted"},
+    {col:COL_MOVED,label:"moved to front"},
+    {col:COL_EVICT,label:"evicted"},
+  ];
+  let lx=30;
+  items.forEach(it=>{
+    const r=svgEl("rect",{x:lx,y:168,width:12,height:12,rx:3,
+      fill:it.col.fill,stroke:it.col.stroke,"stroke-width":"1"});
+    const t=svgEl("text",{x:lx+16,y:174,"dominant-baseline":"central",
+      "font-size":"11",fill:"var(--color-text-secondary)","font-family":"var(--font-sans)"});
+    t.textContent=it.label;
+    leg.appendChild(r); leg.appendChild(t);
+    lx+=it.label.length*7+28;
+  });
+  canvas.appendChild(leg);
+
+  // Arrow legend
+  const al=svgEl("g",{});
+  const lx2=30, ly2=192;
+  // next line
+  const an=svgEl("line",{x1:lx2,y1:ly2,x2:lx2+30,y2:ly2,
+    stroke:"var(--color-border-primary)","stroke-width":"1","marker-end":"url(#ar)"});
+  const tn=svgEl("text",{x:lx2+36,y:ly2,"dominant-baseline":"central",
+    "font-size":"11",fill:"var(--color-text-secondary)","font-family":"var(--font-sans)"});
+  tn.textContent="next →";
+  const ap=svgEl("line",{x1:lx2+100,y1:ly2,x2:lx2+130,y2:ly2,
+    stroke:"var(--color-border-secondary)","stroke-width":"1",
+    "stroke-dasharray":"3 2","marker-end":"url(#ar)"});
+  const tp=svgEl("text",{x:lx2+136,y:ly2,"dominant-baseline":"central",
+    "font-size":"11",fill:"var(--color-text-secondary)","font-family":"var(--font-sans)"});
+  tp.textContent="← prev (dashed)";
+  al.appendChild(an);al.appendChild(tn);al.appendChild(ap);al.appendChild(tp);
+  canvas.appendChild(al);
+}
+
+function drawSpecial(type){
+  canvas.innerHTML="";
+  const W=680;
+
+  if(type==="remove"){
+    // Three nodes A-B-C, show B being removed
+    const nodes=[
+      {x:80,  label:"A", sub:"prev", col:COL_NODE},
+      {x:290, label:"B", sub:"removing", col:COL_EVICT},
+      {x:500, label:"C", sub:"next", col:COL_NODE},
+    ];
+    const bw=100, bh=60, rx=8, y=75;
+    nodes.forEach(nd=>{
+      const cx=nd.x+bw/2;
+      const g=svgEl("g",{class:"pop"});
+      const r=svgEl("rect",{x:nd.x,y,width:bw,height:bh,rx,
+        fill:nd.col.fill,stroke:nd.col.stroke,"stroke-width":"1"});
+      const t=svgEl("text",{x:cx,y:y+20,"text-anchor":"middle","dominant-baseline":"central",
+        "font-size":"13","font-weight":"500",fill:nd.col.text,"font-family":"var(--font-sans)"});
+      t.textContent=nd.label;
+      const s=svgEl("text",{x:cx,y:y+42,"text-anchor":"middle","dominant-baseline":"central",
+        "font-size":"11",fill:nd.col.text,opacity:"0.75","font-family":"var(--font-sans)"});
+      s.textContent=nd.sub;
+      g.appendChild(r);g.appendChild(t);g.appendChild(s);
+      canvas.appendChild(g);
+    });
+    // B→C next (normal)
+    const l1=svgEl("line",{x1:390,y1:y+18,x2:499,y2:y+18,
+      stroke:"var(--color-border-primary)","stroke-width":"1","marker-end":"url(#ar)"});
+    // C→B prev dashed
+    const l2=svgEl("line",{x1:499,y1:y+42,x2:391,y2:y+42,
+      stroke:"var(--color-border-secondary)","stroke-width":"1","stroke-dasharray":"3 2","marker-end":"url(#ar)"});
+    // A→B next
+    const l3=svgEl("line",{x1:181,y1:y+18,x2:289,y2:y+18,
+      stroke:"var(--color-border-primary)","stroke-width":"1","marker-end":"url(#ar)"});
+    // B→A prev dashed
+    const l4=svgEl("line",{x1:289,y1:y+42,x2:181,y2:y+42,
+      stroke:"var(--color-border-secondary)","stroke-width":"1","stroke-dasharray":"3 2","marker-end":"url(#ar)"});
+    canvas.insertBefore(l1,canvas.firstChild);canvas.insertBefore(l2,canvas.firstChild);
+    canvas.insertBefore(l3,canvas.firstChild);canvas.insertBefore(l4,canvas.firstChild);
+    // NEW arrow A→C (green, curved over B)
+    const arc=svgEl("path",{
+      d:"M 181 60 Q 340 10 499 60",
+      fill:"none",stroke:"var(--color-border-success)","stroke-width":"2",
+      "marker-end":"url(#ar)"
+    });
+    const arcB=svgEl("path",{
+      d:"M 499 80 Q 340 130 181 80",
+      fill:"none",stroke:"var(--color-border-success)","stroke-width":"2",
+      "stroke-dasharray":"4 2","marker-end":"url(#ar)"
+    });
+    canvas.appendChild(arc);canvas.appendChild(arcB);
+    // labels on arcs
+    const t1=svgEl("text",{x:340,y:22,"text-anchor":"middle","font-size":"12",
+      fill:"var(--color-text-success)","font-family":"var(--font-sans)"});
+    t1.textContent="① A.next = C";
+    const t2=svgEl("text",{x:340,y:145,"text-anchor":"middle","font-size":"12",
+      fill:"var(--color-text-success)","font-family":"var(--font-sans)"});
+    t2.textContent="② C.prev = A";
+    canvas.appendChild(t1);canvas.appendChild(t2);
+    // code snippet
+    const code=[
+      {x:30,y:180,t:"node.prev.next = node.next;   // A.next → C"},
+      {x:30,y:197,t:"node.next.prev = node.prev;   // C.prev → A"},
+      {x:30,y:214,t:"node.prev = node.next = null; // detach B"},
+    ];
+    code.forEach(c=>{
+      const tx=svgEl("text",{x:c.x,y:c.y,"font-size":"11",
+        fill:"var(--color-text-secondary)","font-family":"var(--font-mono)"});
+      tx.textContent=c.t;
+      canvas.appendChild(tx);
+    });
+
+  } else if(type==="insert"){
+    // HEAD + new node + first
+    const nodes=[
+      {x:60,  label:"HEAD", sub:"", col:COL_HEAD},
+      {x:280, label:"NEW",  sub:"inserting", col:COL_NEW},
+      {x:500, label:"FIRST",sub:"was front", col:COL_NODE},
+    ];
+    const bw=110, bh=60, rx=8, y=75;
+    nodes.forEach((nd,i)=>{
+      const cx=nd.x+bw/2;
+      const g=svgEl("g",{class:"pop"});
+      g.style.animationDelay=(i*50)+"ms";
+      const r=svgEl("rect",{x:nd.x,y,width:bw,height:bh,rx,
+        fill:nd.col.fill,stroke:nd.col.stroke,"stroke-width":"1"});
+      const t=svgEl("text",{x:cx,y:y+20,"text-anchor":"middle","dominant-baseline":"central",
+        "font-size":"13","font-weight":"500",fill:nd.col.text,"font-family":"var(--font-sans)"});
+      t.textContent=nd.label;
+      const s=svgEl("text",{x:cx,y:y+42,"text-anchor":"middle","dominant-baseline":"central",
+        "font-size":"11",fill:nd.col.text,opacity:"0.75","font-family":"var(--font-sans)"});
+      s.textContent=nd.sub;
+      g.appendChild(r);g.appendChild(t);g.appendChild(s);
+      canvas.appendChild(g);
+    });
+    // HEAD→FIRST (old, faded)
+    const old1=svgEl("line",{x1:170,y1:y+18,x2:499,y2:y+18,
+      stroke:"var(--color-border-tertiary)","stroke-width":"1","stroke-dasharray":"4 3","marker-end":"url(#ar)"});
+    canvas.insertBefore(old1,canvas.firstChild);
+    // NEW arrows (green)
+    const arrows=[
+      {x1:390,y1:y+18,x2:499,y2:y+18, label:"① NEW.next=FIRST"},
+      {x1:499,y1:y+42,x2:391,y2:y+42, label:"③ FIRST.prev=NEW", dashed:true},
+      {x1:280,y1:y+42,x2:171,y2:y+42, label:"② NEW.prev=HEAD", dashed:true},
+      {x1:170,y1:y+18,x2:281,y2:y+18, label:"④ HEAD.next=NEW"},
+    ];
+    arrows.forEach((a,i)=>{
+      const line=svgEl("line",{x1:a.x1,y1:a.y1,x2:a.x2,y2:a.y2,
+        stroke:"var(--color-border-success)","stroke-width":"1.5",
+        "marker-end":"url(#ar)",...(a.dashed?{"stroke-dasharray":"4 2"}:{})});
+      canvas.appendChild(line);
+    });
+    const labels=[
+      {x:445,y:y+10,t:"① NEW.next=FIRST"},
+      {x:445,y:y+58,t:"③ FIRST.prev=NEW"},
+      {x:225,y:y+58,t:"② NEW.prev=HEAD"},
+      {x:225,y:y+10,t:"④ HEAD.next=NEW"},
+    ];
+    labels.forEach(lb=>{
+      const tx=svgEl("text",{x:lb.x,y:lb.y,"text-anchor":"middle","font-size":"10",
+        fill:"var(--color-text-success)","font-family":"var(--font-sans)"});
+      tx.textContent=lb.t;
+      canvas.appendChild(tx);
+    });
+    const code=[
+      {x:30,y:175,t:"node.next = head.next;       // ① point forward"},
+      {x:30,y:192,t:"node.prev = head;             // ② point backward"},
+      {x:30,y:209,t:"head.next.prev = node;        // ③ patch FIRST"},
+      {x:30,y:226,t:"head.next = node;             // ④ patch HEAD"},
+    ];
+    code.forEach(c=>{
+      const tx=svgEl("text",{x:c.x,y:c.y,"font-size":"11",
+        fill:"var(--color-text-secondary)","font-family":"var(--font-mono)"});
+      tx.textContent=c.t;
+      canvas.appendChild(tx);
+    });
+  }
+}
+
+function render(){
+  const step = steps[cur];
+  descEl.innerHTML = step.desc;
+  if(step.special) drawSpecial(step.special);
+  else drawNodes(step.nodes, step.strikethrough);
+
+  // dots
+  dotsEl.innerHTML="";
+  steps.forEach((_,i)=>{
+    const d=document.createElement("div");
+    d.className="step-dot"+(i===cur?" active":"");
+    d.onclick=()=>{cur=i;render();};
+    dotsEl.appendChild(d);
+  });
+  document.getElementById("prev-btn").disabled = cur===0;
+  document.getElementById("next-btn").disabled = cur===steps.length-1;
+}
+
+function move(dir){
+  cur = Math.max(0, Math.min(steps.length-1, cur+dir));
+  render();
+}
+
+render();
+</script>

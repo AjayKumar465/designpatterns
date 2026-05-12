@@ -6,10 +6,11 @@ This repository is a practical, interview-grade learning track for distributed s
 
 1. Saga
 2. Transactional Outbox
-3. CQRS
-4. Circuit Breaker
-5. Bulkhead
-6. Strangler Fig
+3. LRU Cache
+4. CQRS
+5. Circuit Breaker
+6. Bulkhead
+7. Strangler Fig
 
 ## Repository Structure
 
@@ -29,6 +30,11 @@ This repository is a practical, interview-grade learning track for distributed s
 2. Transactional Outbox
 - Doc: `docs/outbox.md`
 - Run: `javac examples/outbox/OutboxDemo.java && java -cp examples/outbox OutboxDemo`
+
+3. LRU Cache (Capacity 5)
+- Doc: `docs/lru-cache.md`
+- Run: `javac examples/lru/LruCacheDemo.java && java -cp examples/lru LruCacheDemo`
+- Alternative implementation (LinkedHashMap): `javac examples/lru/LruCacheLinkedHashMapDemo.java && java -cp examples/lru LruCacheLinkedHashMapDemo`
 
 ## Design Goal
 

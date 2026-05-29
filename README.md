@@ -6,11 +6,12 @@ This repository is a practical, interview-grade learning track for distributed s
 
 1. Saga
 2. Transactional Outbox
-3. LRU Cache
-4. CQRS
-5. Circuit Breaker
-6. Bulkhead
-7. Strangler Fig
+3. Custom Spring Boot Starter
+4. LRU Cache
+5. CQRS
+6. Circuit Breaker
+7. Bulkhead
+8. Strangler Fig
 
 ## Repository Structure
 
@@ -31,7 +32,11 @@ This repository is a practical, interview-grade learning track for distributed s
 - Doc: `docs/outbox.md`
 - Run: `javac examples/outbox/OutboxDemo.java && java -cp examples/outbox OutboxDemo`
 
-3. LRU Cache (Capacity 5)
+3. Custom Spring Boot Starter
+- Doc: `docs/custom-spring-boot-starter.md`
+- Covers: autoconfiguration, dependency management, transitive dependency pull-through, publishing, and production readiness
+
+4. LRU Cache (Capacity 5)
 - Doc: `docs/lru-cache.md`
 - Run: `javac examples/lru/LruCacheDemo.java && java -cp examples/lru LruCacheDemo`
 - Alternative implementation (LinkedHashMap): `javac examples/lru/LruCacheLinkedHashMapDemo.java && java -cp examples/lru LruCacheLinkedHashMapDemo`

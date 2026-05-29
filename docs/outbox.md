@@ -1,36 +1,74 @@
-# Transactional Outbox Pattern (Production Reference)
+# Transactional Outbox Pattern: Production Playbook
 
-## Problem
+## Why This Pattern Exists
 
-One service must do both:
+Any service that both writes local state and publishes an event has a dual-write problem.
 
-1. Commit local business data
-2. Publish integration event to Kafka
+1. Database commit succeeds, event publish fails: downstream systems never learn about the change.
+2. Event publish succeeds, database commit fails: downstream systems process an event for data that does not exist.
 
-Naive dual write:
+Transactional Outbox solves this by writing business data and event record in one local database transaction, then publishing asynchronously from the outbox table.
 
-1. DB commit succeeds, Kafka publish fails -> downstream never sees state change
-2. Kafka publish succeeds, DB commit fails -> downstream sees phantom event
+## Real Production Scenarios
 
-## Core Idea
+### Scenario 1: E-commerce Order Placement
 
-Persist domain data and outbound event in one local DB transaction.
-A separate relay publishes outbox rows to Kafka and marks them delivered.
+1. `order-service` writes `orders` row (`PLACED`) and outbox event `OrderPlaced`.
+2. Relay publishes `OrderPlaced` to Kafka topic `orders.events`.
+3. `payment-service` and `inventory-service` consume and act.
+4. If Kafka is down, order write still succeeds; event is delayed but not lost.
+
+Business impact:
+
+1. Customer order is durable immediately.
+2. Dependent systems converge eventually.
+3. Operations can monitor backlog and recover without data repair scripts.
+
+### Scenario 2: Payment Capture in a Saga
+
+1. `payment-service` captures payment and writes outbox `PaymentCaptured`.
+2. Saga orchestrator consumes and triggers shipment.
+3. If relay crashes after publishing but before marking `SENT`, same event can be re-published.
+4. Orchestrator dedupes by `event_id` and proceeds once.
+
+Business impact:
+
+1. No missed saga transitions.
+2. Duplicate events do not produce duplicate shipments.
+
+### Scenario 3: User Profile Update + Search Index Sync
+
+1. `profile-service` updates canonical user profile.
+2. Outbox event `UserProfileUpdated` is written in same transaction.
+3. Search-index updater consumes and updates Elastic/OpenSearch index.
+4. Index lag is tolerated; correctness is maintained.
+
+Business impact:
+
+1. Source of truth remains consistent.
+2. Read models catch up asynchronously and safely.
 
 ---
 
-## Production Stack (Typical)
+## Step-by-Step Implementation
 
-1. Spring Boot 3
-2. PostgreSQL (domain + outbox table)
-3. Kafka producer with idempotence enabled
-4. Relay: polling worker or Debezium CDC
-5. Avro/Protobuf + Schema Registry
-6. Micrometer + OpenTelemetry for metrics/traces
+## Step 1: Define Event Envelope
 
----
+Minimum fields for cross-service safety:
 
-## Recommended Outbox Table
+1. `event_id` (UUID, immutable, globally unique)
+2. `event_type` (semantic name, versioned)
+3. `aggregate_type` and `aggregate_id`
+4. `partition_key` (ordering key)
+5. `payload` (JSON/Avro/Protobuf)
+6. `headers` (`trace_id`, `tenant_id`, schema version)
+7. `occurred_at` and `created_at`
+
+Rule:
+
+1. Never mutate payload after insert.
+
+## Step 2: Create Outbox Table
 
 ```sql
 create table outbox_event (
@@ -41,8 +79,9 @@ create table outbox_event (
   payload            jsonb not null,
   headers            jsonb not null,
   status             varchar(20) not null, -- PENDING|SENT|FAILED
-  partition_key      varchar(100) not null, -- often aggregate_id or saga_id
+  partition_key      varchar(100) not null,
   created_at         timestamptz not null default now(),
+  occurred_at        timestamptz not null default now(),
   published_at       timestamptz,
   retry_count        int not null default 0,
   next_retry_at      timestamptz,
@@ -51,48 +90,61 @@ create table outbox_event (
 
 create index idx_outbox_pending
   on outbox_event(status, next_retry_at, created_at);
+
+create index idx_outbox_aggregate
+  on outbox_event(aggregate_type, aggregate_id, created_at);
 ```
 
-## Write Path (Inside One Transaction)
+Operational note:
+
+1. Keep only `PENDING` rows hot.
+2. Archive or partition old `SENT` rows.
+
+## Step 3: Write Domain Data + Outbox in One Transaction
 
 ```java
 @Transactional
-public void createOrder(CreateOrderCommand cmd) {
-    Order order = orderRepository.save(Order.create(cmd));
+public OrderId placeOrder(PlaceOrderCommand cmd) {
+    Order order = orderRepository.save(Order.place(cmd));
 
-    OutboxEvent e = OutboxEvent.pending(
+    OutboxEvent outboxEvent = OutboxEvent.pending(
         UUID.randomUUID(),
         "Order",
         order.getId().toString(),
-        "OrderCreated",
-        toJson(orderCreatedPayload(order)),
-        Map.of("traceId", currentTraceId()),
-        order.getId().toString() // partition key
+        "OrderPlaced.v1",
+        toJson(Map.of(
+            "orderId", order.getId().toString(),
+            "customerId", order.getCustomerId().toString(),
+            "totalAmount", order.getTotalAmount().toString()
+        )),
+        Map.of(
+            "traceId", currentTraceId(),
+            "schemaVersion", "1"
+        ),
+        order.getId().toString()
     );
 
-    outboxRepository.save(e);
+    outboxRepository.save(outboxEvent);
+    return order.getId();
 }
 ```
 
-Key rule:
+Hard rule:
 
-- Never publish directly to Kafka in this method.
+1. Do not call Kafka producer from this transaction.
 
----
+## Step 4: Implement Relay (Polling Pattern)
 
-## Relay Strategies
+Batch flow:
 
-## 1) Polling Relay
+1. Start DB transaction.
+2. Select `PENDING` due rows using `FOR UPDATE SKIP LOCKED`.
+3. Publish each event to Kafka with `event_id` header.
+4. Mark `SENT` + `published_at` on success.
+5. On failure, increment `retry_count`, set exponential `next_retry_at`, store `last_error`.
+6. Commit and repeat.
 
-Worker loop:
-
-1. Fetch due `PENDING` rows in small batches
-2. Lock rows (`FOR UPDATE SKIP LOCKED`) for multi-worker safety
-3. Publish to Kafka
-4. Mark `SENT` with `published_at`
-5. On error, increment `retry_count`, set `next_retry_at`, capture `last_error`
-
-Typical fetch query:
+Fetch query:
 
 ```sql
 select *
@@ -104,110 +156,92 @@ for update skip locked
 limit 200;
 ```
 
-## 2) CDC Relay (Debezium Outbox)
+## Step 5: Backoff and Terminal Failure Policy
 
-1. App only writes to outbox table
-2. Debezium streams DB change events to Kafka
-3. Kafka Connect handles delivery and offsets
+Recommended retry policy:
 
-When to prefer CDC:
+1. Attempts `1..8` with exponential backoff + jitter.
+2. Transient errors stay `PENDING`.
+3. After max attempts, mark `FAILED` and page on-call.
 
-1. High throughput
-2. Need lower relay maintenance burden
-3. Strong platform support for Kafka Connect
+Formula example:
 
----
+1. `delay = min(base * 2^retry_count, max_delay) + jitter`
+2. `base = 1s`, `max_delay = 15m`, jitter `0..500ms`
 
-## Kafka Producer Baseline Settings
+## Step 6: Consumer Idempotency (Non-Negotiable)
 
-1. `acks=all`
-2. `enable.idempotence=true`
-3. `retries` high (bounded by delivery timeout)
-4. `compression.type=zstd` (or snappy)
-5. Stable keying by `partition_key`
+Consumer flow:
 
-Ordering note:
+1. Check `event_id` in processed-events store.
+2. If seen, acknowledge and skip side effects.
+3. If new, apply side effects in transaction and store `event_id`.
+4. Commit offset only after durable commit.
 
-- Use same key for related events (`aggregate_id` or `saga_id`) to preserve per-entity order.
+Outbox solves producer consistency, not consumer exactly-once effects.
 
----
+## Step 7: Monitor and Operate
 
-## Consumer Contract (Still Mandatory)
-
-Outbox prevents producer-side dual-write inconsistency.
-It does not guarantee exactly-once business effect on consumers.
-
-Consumer must:
-
-1. Dedupe by `event_id` (processed-events table/cache)
-2. Be idempotent for side effects
-3. Commit offsets only after durable local handling
-
----
-
-## Failure Scenarios and Handling
-
-1. Relay crashes after Kafka publish but before marking row `SENT`
-- Row is republished on restart
-- Consumer dedupe must absorb duplicate
-
-2. Kafka unavailable for long duration
-- Outbox backlog grows
-- Alert on oldest pending age and queue size
-
-3. Poison payload
-- Repeated publish failures
-- Move to `FAILED` after threshold, raise operational incident
-
-4. DB hot spot on outbox index
-- Partition table or archive old `SENT` rows
-- Keep pending index selective
-
----
-
-## Operational Metrics (Required)
+Track:
 
 1. `outbox_pending_count`
 2. `outbox_oldest_pending_age_seconds`
 3. `outbox_publish_success_total`
 4. `outbox_publish_failure_total`
-5. `outbox_retry_count` (distribution)
-6. `outbox_relay_batch_latency_ms`
-7. `outbox_failed_terminal_count`
-8. `consumer_duplicate_dropped_total`
+5. `outbox_retry_count` histogram
+6. `outbox_failed_terminal_count`
+7. `consumer_duplicate_dropped_total`
 
-Alert examples:
+Alert thresholds (example):
 
-1. Oldest pending age > SLO threshold
-2. Publish failure ratio > baseline
-3. Terminal failed events > 0
-
----
-
-## Tradeoffs
-
-Pros:
-
-1. Eliminates producer dual-write race
-2. Strong durability with restart safety
-3. Works well with Saga and event-driven integration
-
-Cons:
-
-1. Extra infra and operational complexity
-2. Eventual consistency window
-3. Requires rigorous consumer idempotency anyway
+1. Oldest pending age > 120s for 10m.
+2. Publish failures > 5% over 5m.
+3. Any terminal failed event > 0.
 
 ---
 
-## Relationship to Saga
+## Relay Choice: Polling vs CDC
 
-In production, orchestrator/service steps often use:
+### Polling Relay
 
-1. Local state update + outbox write in one transaction
-2. Relay to publish saga command/reply events safely
+Use when:
 
-This is the standard way to avoid lost saga events during crashes.
+1. You want simple ownership in service code.
+2. Throughput is moderate.
+3. Team is not operating Kafka Connect/Debezium yet.
+
+### CDC Relay (Debezium Outbox)
+
+Use when:
+
+1. Throughput is high.
+2. Central platform team already runs Connect reliably.
+3. You want to avoid custom relay worker lifecycle management.
+
+Tradeoff:
+
+1. CDC reduces app code but increases platform dependency.
+
+---
+
+## Common Production Mistakes
+
+1. Publishing from request transaction and treating outbox as optional fallback.
+2. Missing consumer dedupe because "producer is idempotent".
+3. Unbounded outbox growth with no archival strategy.
+4. Bad partition key causing reordering across related events.
+5. No alerting on pending age, only on error count.
+
+---
+
+## Minimal Readiness Checklist
+
+1. Domain + outbox in same DB transaction.
+2. Relay supports locking, retry, and backoff.
+3. Consumer dedupe implemented and tested.
+4. Pending-age SLO defined and alerted.
+5. Replay runbook documented for `FAILED` events.
+6. Event schema versioning strategy agreed.
 
 ## Reference Example in Repo
 

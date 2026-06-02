@@ -43,6 +43,10 @@ This repository is a practical, interview-grade learning track for distributed s
 - Run: `javac examples/lru/LruCacheDemo.java && java -cp examples/lru LruCacheDemo`
 - Alternative implementation (LinkedHashMap): `javac examples/lru/LruCacheLinkedHashMapDemo.java && java -cp examples/lru LruCacheLinkedHashMapDemo`
 
+5. CQRS
+- Doc: `docs/cqrs.md`
+- Covers: command model, read model, projectors, eventual consistency, rebuild strategy, and production operations
+
 ## Design Goal
 
 Each pattern in this repository should answer five practical questions:

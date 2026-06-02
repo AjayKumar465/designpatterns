@@ -1,0 +1,4 @@
+demo:
+  greeting:
+    enabled: true
+    prefix: Hello

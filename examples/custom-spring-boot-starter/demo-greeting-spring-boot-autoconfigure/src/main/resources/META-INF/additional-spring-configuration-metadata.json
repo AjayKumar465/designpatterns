@@ -1,0 +1,16 @@
+{
+  "properties": [
+    {
+      "name": "demo.greeting.enabled",
+      "type": "java.lang.Boolean",
+      "description": "Whether the demo greeting auto-configuration should create a GreetingService.",
+      "defaultValue": true
+    },
+    {
+      "name": "demo.greeting.prefix",
+      "type": "java.lang.String",
+      "description": "Prefix used by the default GreetingService.",
+      "defaultValue": "Hello"
+    }
+  ]
+}

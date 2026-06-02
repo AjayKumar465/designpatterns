@@ -35,6 +35,8 @@ This repository is a practical, interview-grade learning track for distributed s
 3. Custom Spring Boot Starter
 - Doc: `docs/custom-spring-boot-starter.md`
 - Covers: autoconfiguration, dependency management, transitive dependency pull-through, publishing, and production readiness
+- Demo: `examples/custom-spring-boot-starter`
+- Run: `cd examples/custom-spring-boot-starter && mvn clean verify && mvn -pl demo-consumer-app -am spring-boot:run`
 
 4. LRU Cache (Capacity 5)
 - Doc: `docs/lru-cache.md`

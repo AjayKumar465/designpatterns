@@ -2374,3 +2374,84 @@ toList() → Java 16+ shorthand (immutable, unmodifiable)
 ---
 
 *Sources: OpenJDK JEPs (440, 441, 444, 491, 505), Java official docs, Baeldung, Concurrency Deep Dives, TheCodeForge, Medium engineering blogs (April-May 2026), Reddit r/java production discussions, JavaCodeGeeks virtual threads war stories, devops-monk.com benchmarks, BackendBytes stream internals guide, Spring Boot official docs.*
+
+---
+
+## How to Talk About Java Concurrency & Streams in an Interview (Human English)
+
+> This section is how you'd explain these topics conversationally in an interview — casual, clear, with the "why" behind every "what".
+
+---
+
+### "What's the difference between Future and CompletableFuture?"
+
+> "So `Future` came out in Java 5 and its big limitation is that to get the result, you have to call `.get()`, which blocks the thread you're on. Imagine you submit 200 tasks and then call `.get()` on all of them — you have 200 threads just sitting there waiting. That doesn't scale. `CompletableFuture` from Java 8 is non-blocking — instead of blocking and waiting, you register a callback: 'when this finishes, do that'. The thread is free to do other work. You can also chain things: fetch user, then fetch their orders, then build a response — all as a pipeline where each step starts as soon as the previous one finishes, without blocking any thread in between."
+
+---
+
+### "Explain thenApply vs thenCompose to me."
+
+> "I think of it exactly like `map` vs `flatMap` in streams. `thenApply` is map — your function returns a plain value. `thenCompose` is flatMap — your function returns another `CompletableFuture`. The difference matters because if you use `thenApply` when your function returns a `CompletableFuture`, you end up with `CompletableFuture<CompletableFuture<T>>` — a nested future. To read it you'd have to call `.get()` twice. `thenCompose` flattens it to `CompletableFuture<T>`. Rule I follow: does my lambda return a plain value? Use `thenApply`. Does it return another `CompletableFuture`? Use `thenCompose`. I've caught this bug in almost every codebase I've reviewed."
+
+---
+
+### "What's wrong with ForkJoinPool.commonPool for I/O tasks?"
+
+> "The common pool is shared by the entire JVM — parallel streams use it, `CompletableFuture.supplyAsync` without an executor uses it, and some library code uses it too. It's sized to CPU core count. If I'm doing I/O on those threads — database calls, HTTP requests — each thread blocks waiting for the response. Now the pool is exhausted. Parallel streams stall. Other async tasks stall. Everything grinds to a halt. For I/O you always provide your own dedicated executor, ideally a virtual thread executor on Java 21+. The common pool should only ever touch CPU-bound work."
+
+---
+
+### "What are virtual threads and why were they introduced?"
+
+> "The traditional model is thread-per-request — one platform thread per incoming request. Platform threads are expensive: 1MB of stack, an OS thread, context switch overhead. So you size your thread pool to maybe 200, and that limits you to 200 concurrent requests. Virtual threads are JVM-managed — they're super lightweight, maybe 1KB of stack, managed entirely by the JVM. When a virtual thread blocks on I/O, the JVM just parks it and assigns the underlying OS thread to a different virtual thread. You can have a million virtual threads running concurrently. For Spring Boot, you just set `spring.threads.virtual.enabled=true` and suddenly one property turns your service into something that can handle massive I/O concurrency with plain blocking code — no reactive programming needed."
+
+---
+
+### "What's the pinning problem with virtual threads?"
+
+> "In Java 21, if a virtual thread was inside a `synchronized` block and then blocked on I/O, the JVM couldn't unmount it — the whole OS thread was 'pinned' and blocked. This is called thread pinning. Netflix actually had a production deadlock from this — their service used `synchronized` inside heavily-loaded code paths, all carrier threads got pinned, nothing could run. The fix back then was to replace `synchronized` with `ReentrantLock` which doesn't pin. But this is mostly a historical concern now — Java 24 fixed it with JEP 491. On Java 24 and Java 25 LTS, `synchronized` no longer pins virtual threads at all."
+
+---
+
+### "When would you use Streams vs a for loop?"
+
+> "Streams shine for multi-step transformations where I'm filtering, mapping, grouping — pipeline-style operations on collections. The code reads like what it does. For a simple loop with an index, or mutation, or early return based on an external condition, a plain for loop is clearer. The real pitfall I see in codebases is streams used everywhere including inside tight loops on tiny collections — that adds overhead for no benefit. Streams also have a laziness benefit — nothing executes until a terminal operation is called — and short-circuiting, where `findFirst()` stops as soon as it finds a match instead of processing the whole collection."
+
+---
+
+### "What's the difference between map, flatMap, and mapMulti in streams?"
+
+> "Map is one-to-one. For each element in, you get exactly one element out — just transformed. FlatMap is one-to-many — for each element in, you get a stream of elements out, and they all get flattened into the result. The classic example is splitting sentences into words: you flatMap each sentence to a stream of words. MapMulti from Java 16 is like flatMap but imperative — instead of returning a stream, you get a Consumer and you push elements into it. It's slightly more efficient for small expansions because you're not creating intermediate stream objects. I default to flatMap for readability and only switch to mapMulti when profiling shows a bottleneck."
+
+---
+
+### "When should you NOT use parallel streams?"
+
+> "Three hard no's: First, I/O inside the lambda — doing a database call or HTTP request inside a parallel stream blocks ForkJoinPool worker threads, which the whole JVM shares. Second, small collections — the overhead of splitting and merging is more than the computation saved. Third, shared mutable state — adding to an `ArrayList` from parallel threads causes race conditions. Parallel streams are for CPU-bound, large-dataset, stateless work — like computing hashes of a million records. For I/O concurrency, I use virtual threads. For CPU work on large data, parallel streams with a properly sized custom pool."
+
+---
+
+### "What is a sealed class and why does it matter?"
+
+> "A sealed class restricts which other classes can extend it using a `permits` clause. The key benefit is that the compiler knows the complete set of subtypes at compile time. So when you write a `switch` over a sealed type using pattern matching, the compiler can verify you've handled all cases. No `default` branch needed. And if you add a new subtype later, every switch that was exhaustive before now fails to compile — forcing you to handle the new case. It's compile-time exhaustiveness checking. Combined with records, it lets you write algebraic data types in Java — like `Result` being either `Success` or `Failure`, and the compiler makes sure you handle both."
+
+---
+
+### Quick Cheat Sheet for Verbal Answers
+
+| Question | One-line answer |
+|---|---|
+| Future vs CompletableFuture? | Future blocks on `.get()`. CF uses non-blocking callbacks and pipelines |
+| thenApply vs thenCompose? | thenApply = map (plain value). thenCompose = flatMap (another future) |
+| What's wrong with commonPool for I/O? | It's shared by the whole JVM and sized to CPU count — blocks everything |
+| What are virtual threads? | Lightweight JVM-managed threads that unmount on I/O — no OS thread blocked |
+| Virtual thread pinning? | synchronized + blocking I/O pinned the carrier — fixed in Java 24 (JEP 491) |
+| When to use parallel streams? | CPU-bound, large collections (N×Q > 10k), no I/O, stateless operations |
+| map vs flatMap? | map = 1-to-1. flatMap = 1-to-many (flattens nested streams) |
+| Stream lazy evaluation? | Nothing runs until a terminal operation is called |
+| Short-circuiting? | findFirst/anyMatch stop processing early once result is known |
+| Boxing performance trap? | `Stream<Integer>` is ~15x slower than `IntStream` for numeric work |
+| Records vs regular class? | Records are immutable data carriers — auto-generate equals/hashCode/toString, cannot extend |
+| Sealed class benefit? | Compiler-enforced exhaustiveness — handle all subtypes or it won't compile |
+| ScopedValue vs ThreadLocal? | ScopedValue is immutable per scope, auto-propagated to child virtual threads |
+

@@ -744,3 +744,39 @@ Push beyond textbook answer:
 2. Creating your own auto-configuration: https://docs.spring.io/spring-boot/reference/features/developing-auto-configuration.html
 3. Spring Boot build systems and starters: https://docs.spring.io/spring-boot/4.0/reference/using/build-systems.html
 4. Spring Boot Gradle dependency management: https://docs.spring.io/spring-boot/gradle-plugin/managing-dependencies.html
+
+---
+
+## How to Talk About Custom Spring Boot Starters in an Interview (Human English)
+
+---
+
+### "What is a Spring Boot Starter and why would you build one?"
+
+> "Spring Boot starters are those `spring-boot-starter-*` dependencies you add to your project. When you add `spring-boot-starter-data-jpa`, it pulls in JPA, Hibernate, transaction management, and auto-configures a DataSource for you — you just set the URL in `application.yml`. A custom starter is you building that same experience for your company's internal libraries. Instead of every team copying the same 100 lines of configuration code to set up, say, your company's audit logging or observability setup, you package it once as a starter and they just add one dependency and it works. Convention over configuration, internal edition."
+
+---
+
+### "How does auto-configuration actually work?"
+
+> "Spring Boot's auto-configuration is powered by `@ConditionalOn*` annotations. When the starter's JAR is on the classpath, Spring finds the auto-configuration class via `META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports`. But the beans don't all blindly activate — they're conditional. `@ConditionalOnMissingBean(DataSource.class)` means 'only create this DataSource if the user hasn't defined one already'. `@ConditionalOnProperty('acme.feature.enabled', havingValue='true')` means 'only activate this if the user opts in via a property'. This way the starter provides sensible defaults but the user can override anything. That's the contract."
+
+---
+
+### "What's the naming convention and why does it matter?"
+
+> "Third-party starters (yours and mine) should be named `acme-spring-boot-starter`. Spring's own starters are `spring-boot-starter-*`. Never start your starter name with `spring-boot` — that namespace is reserved for the Spring team. The auto-configure module should be separate from the starter module: `acme-observability-spring-boot-autoconfigure` holds the `@Configuration` classes and conditions. `acme-observability-spring-boot-starter` is just a thin POM that depends on the autoconfigure module plus required libraries. Users add the starter; the autoconfigure activates transparently."
+
+---
+
+### Quick Cheat Sheet
+
+| Question | One-line answer |
+|---|---|
+| What is a starter? | A dependency that auto-configures library integration with sensible defaults |
+| How does auto-config work? | `@ConditionalOn*` annotations + `AutoConfiguration.imports` registration |
+| Naming rule? | `acme-spring-boot-starter` — never prefix with `spring-boot-*` |
+| User override? | `@ConditionalOnMissingBean` lets user's own bean take precedence |
+| Two module pattern? | `-autoconfigure` (logic) + `-starter` (dependency aggregator) |
+| When to build one? | When the same config is copy-pasted across multiple internal services |
+

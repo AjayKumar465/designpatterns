@@ -2353,3 +2353,69 @@ increase(metric_sum[5m]) / increase(metric_count[5m])
 ---
 
 *Sources: Micrometer Official Docs, Spring Boot Actuator Reference, Prometheus Documentation, Google SRE Workbook, Grafana Cloud Docs, Medium engineering blogs, Reddit r/java and r/prometheus discussions, Confluent/Uptrace/Better Stack community guides.*
+
+---
+
+## How to Talk About Metrics & Observability in an Interview (Human English)
+
+> This section is how you'd actually talk through observability in a real conversation with an interviewer — in plain English, like a senior engineer at a whiteboard.
+
+---
+
+### "What's the difference between monitoring and observability?"
+
+> "Monitoring is about knowing your known-unknowns — I set up alerts for things I expect might go wrong. CPU > 80%, error rate > 1%, response time > 500ms. If something I've already thought of happens, I get paged. Observability is broader — it's about my system telling me enough that I can understand *any* failure, even ones I didn't anticipate. Observability comes from having good metrics, traces, and logs together. Monitoring is a tool you use on top of an observable system. You can have monitoring without observability — that's most legacy systems. You can't have meaningful observability without good monitoring."
+
+---
+
+### "What are the four golden signals?"
+
+> "Google SRE came up with these for any service: Latency — how long requests take. Traffic — how many requests per second. Errors — what percentage are failing. Saturation — how close the system is to its limits, like CPU or memory or queue depth. If I'm setting up a new service and I only have time for four dashboards, these are the four. Everything else is secondary. High latency + increasing error rate + saturation = something is wrong and I need to page someone right now."
+
+---
+
+### "What is Micrometer and why do you use it?"
+
+> "Micrometer is to metrics what SLF4J is to logging — it's a facade. I write `Counter.builder('payments.processed').register(registry)` once, and it works with Prometheus, Datadog, CloudWatch, whatever backend I'm sending metrics to. If I hardcode Prometheus client directly, I'm locked in. With Micrometer, I switch backends by changing a dependency. Spring Boot has Micrometer baked in — auto-configuration gives me JVM metrics, HTTP metrics, HikariCP pool metrics, Kafka consumer lag metrics, all for free. I only write code for business metrics — like 'orders placed', 'payment failures', 'fraud flags'."
+
+---
+
+### "What's the difference between a Counter, Gauge, and Timer?"
+
+> "Counter only goes up — it's for things you count, like 'total orders placed', 'total errors'. You query it as a rate: how many per second over the last 5 minutes. Gauge is a point-in-time snapshot — like current queue depth, current active sessions, current JVM heap used. It goes up and down. Timer measures duration and count together — it's for 'how long did this operation take'. Under the hood, Timer gives you percentiles — p50, p95, p99. I use Timer for every HTTP endpoint and every external call. When someone says 'the checkout is slow', I go straight to the p99 of the checkout Timer."
+
+---
+
+### "What's cardinality and why does it matter?"
+
+> "Cardinality is the number of unique tag combinations you have for a metric. Tags are great — they let me filter by customer, by region, by payment method. But if I tag by `userId`, and I have 10 million users, Prometheus has to store 10 million time series for that one metric. That's cardinality explosion — it can crash Prometheus. The rule is: high-cardinality values (user IDs, order IDs, session tokens) go into *traces* as span attributes. Low-cardinality values (payment method = visa/mastercard/paypal, status = success/failure, region = us-east/eu-west) go into *metric tags*. I use `MeterFilter` in Micrometer to block or cap cardinality before it hits the registry."
+
+---
+
+### "What is an SLO and how does it relate to alerting?"
+
+> "SLO is Service Level Objective — a target for reliability. Like 'our API will serve 99.9% of requests successfully'. An SLI is the actual measurement — the error rate. An SLA is the contract with the customer — 99.9% or we give you credit. Error budget is what's left: if my SLO is 99.9%, I get 0.1% errors to 'spend'. Good alerting is burn rate based — not 'error rate is above 1%' but 'you're burning your error budget 14x faster than normal'. That alert fires early with the right severity. A slow burn (5x) pages during business hours. A fast burn (14x) wakes someone up at 3am."
+
+---
+
+### "How do you debug a production latency spike using metrics?"
+
+> "First I look at the request latency histogram — p50 flat but p99 spiking means it's affecting a subset of requests, not all of them. Then I check downstream dependencies: is the database pool exhausted? (HikariCP `hikaricp.connections.pending` > 0 for sustained time). Is an external API slow? (HTTP client timer p99 went up). I check GC pause duration — sometimes a full GC causes latency spikes that look like slow requests. I look at thread pool queue depth — if the queue is filling up, new requests start seeing higher latency before they're even processed. With distributed traces, I can find the exact span that's slow. Metrics narrow it down to the component; traces find the exact request."
+
+---
+
+### Quick Cheat Sheet for Verbal Answers
+
+| Question | One-line answer |
+|---|---|
+| Four Golden Signals? | Latency, Traffic, Errors, Saturation — the minimum viable dashboard |
+| Counter vs Gauge vs Timer? | Counter: always up (total count). Gauge: current value (snapshot). Timer: duration + count + percentiles |
+| What is cardinality? | Number of unique tag combinations — high cardinality kills Prometheus, put those in traces |
+| What is Micrometer? | Metrics facade — write once, works with any backend (Prometheus, Datadog, etc.) |
+| What is an SLO? | Target reliability promise — e.g. 99.9% success rate |
+| What is error budget? | (1 - SLO) × time window — how much failure you're allowed before breaching |
+| What is burn rate alert? | Alert on how fast you're consuming error budget, not just error percentage |
+| What is p99 latency? | 99% of requests finish in less than this time — 1% are slower |
+| What is histogram vs summary? | Histogram: raw buckets, aggregatable across replicas. Summary: pre-computed percentiles on one instance |
+| What is `@Timed`? | Spring annotation that auto-records method duration — but AOP can miss self-invocation |
+

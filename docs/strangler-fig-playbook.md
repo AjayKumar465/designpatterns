@@ -1508,3 +1508,58 @@ Is the legacy system causing pain?
 | Parity | Behavioral equivalence between legacy and new system |
 | Decommission | Removing legacy code, routes, and data after successful migration |
 | Seam | A point in the monolith where you can insert a boundary for extraction |
+
+---
+
+## How to Talk About the Strangler Fig Pattern in an Interview (Human English)
+
+> This section is how you'd explain this pattern in a real interview conversation — natural, clear, with the reasoning behind the decisions.
+
+---
+
+### "What is the Strangler Fig pattern?"
+
+> "The name comes from a real tree — a strangler fig grows around a host tree, slowly wraps it, and eventually the host dies and the fig tree stands on its own. In software, it's the same idea. You have a legacy monolith running in production. You can't stop the world and rewrite it from scratch — that's a big-bang rewrite and it almost always fails. Instead, you put a routing facade in front of the monolith. You incrementally build new microservices beside it. You route traffic to the new service gradually — maybe 5% first, then 50%, then 100%. The monolith slowly gets 'strangled' — feature by feature, until nothing is calling it anymore and you shut it down."
+
+**Real analogy:**
+> "Think of it like replacing the engine in a car while it's driving. You can't stop the car. But you can add a new engine beside the old one, gradually transfer load, and eventually remove the old one — without the passengers ever noticing."
+
+---
+
+### "How does the routing work?"
+
+> "You put a facade in front — a reverse proxy, an API gateway, something like Spring Cloud Gateway or Nginx, or even a service mesh like Istio. Initially it routes 100% to the monolith. As you build new services, you flip the routing. Start with low-risk, well-defined features first — something bounded, not tangled with 20 other things. Once the new service is proven in production — good metrics, correct behavior, passing parity tests — you increase traffic. It's canary deployment but for migration, not for feature flags."
+
+---
+
+### "What's the hardest part of this pattern?"
+
+> "Data migration is the real challenge — nobody talks about it enough. It's easy to move business logic. It's hard to move data. If the new service needs its own database but the monolith still owns the source of truth, you end up doing dual writes or CDC (Change Data Capture with something like Debezium). During the transition period, you have two systems claiming ownership. You need reconciliation jobs to detect drift. It's messy. This is why I always say: extract one bounded context at a time, clean up the data ownership before moving to the next domain."
+
+---
+
+### "How do you prevent the new service from depending on monolith internals?"
+
+> "Anti-Corruption Layer — ACL. The new service defines its own domain model. When it needs data from the monolith, it goes through an adapter that translates — so if the monolith changes its internal model, you update the adapter, not the new service. It's the same concept as an interface between two worlds so neither leaks into the other. This is how you maintain clean domain boundaries during the transition period."
+
+---
+
+### "When would you NOT use this pattern?"
+
+> "If the monolith is genuinely small and the team has capacity to do a proper bounded rewrite — maybe you don't need Strangler Fig, you just carve out services cleanly. Strangler Fig has overhead: you need to maintain two systems simultaneously, you need parity testing, you need the facade layer. If the monolith is already mostly decomposed or it's small enough for a two-week rewrite, the pattern adds more complexity than it removes. It's really designed for large, entangled systems that have to keep running while you fix them."
+
+---
+
+### Quick Cheat Sheet for Verbal Answers
+
+| Question | One-line answer |
+|---|---|
+| What is Strangler Fig? | Incrementally replace a monolith by routing traffic to new services, piece by piece |
+| What is the Facade? | The routing layer (API Gateway, reverse proxy) that decides: old or new? |
+| What is the ACL? | Anti-Corruption Layer — translates between monolith and new service models |
+| What is the hardest part? | Data migration — who owns the source of truth during transition |
+| How do you test correctness? | Shadow traffic (run both, compare results) and parity tests |
+| When to stop? | When no traffic flows to the monolith — then decommission |
+| Big-bang vs Strangler Fig? | Big-bang = full rewrite, high risk, long freeze. Strangler = incremental, live in prod |
+| What's dual write? | Writing to both old DB and new DB during migration — needs reconciliation |
+

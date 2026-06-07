@@ -751,3 +751,50 @@ CQRS commonly appears with:
 3. Event Sourcing: optional source-of-truth event store, not mandatory for CQRS.
 
 See `docs/outbox.md` and `docs/saga.md` for the reliability patterns that usually surround production CQRS.
+
+---
+
+## How to Talk About CQRS in an Interview (Human English)
+
+> This is how you'd explain CQRS naturally in a conversation — no jargon overload, just how a senior engineer would actually talk through it.
+
+---
+
+### "What is CQRS?"
+
+> "CQRS stands for Command Query Responsibility Segregation — which sounds fancy but the idea is simple. Commands change state. Queries read state. In traditional systems, you have one model for both — you use the same object to write and to read. CQRS says those two things have different requirements, so let them be different. The write side cares about validation, business rules, transactions, invariants. The read side cares about fast lookup, denormalized joins, pagination, search. When you try to serve both with one model, the write model gets polluted with read concerns and vice versa."
+
+**Simple analogy:**
+> "Think of a chef and a waiter. The chef's job is to cook — that's the write side, complex rules, ordering, sequences. The waiter's job is to describe what's on the menu and what's ready — that's the read side, simple and fast. You wouldn't make the chef describe every dish to every table — you separate the concerns."
+
+---
+
+### "Why would you split into separate read and write databases?"
+
+> "Once you allow the read model to be different from the write model, you can optimize each independently. The write database can be a normalized relational DB — great for transactions and constraints. The read database can be a Postgres read replica, a Redis cache, Elasticsearch, or a denormalized projection — whatever makes queries fast. The tradeoff is eventual consistency: after a write, the read model updates asynchronously. Depending on the business, that's totally fine — an e-commerce product catalog being 2 seconds stale is acceptable. An account balance being stale is not."
+
+---
+
+### "How do you keep the read model in sync?"
+
+> "Events. When the write side processes a command and changes state, it publishes a domain event — 'OrderPlaced', 'PaymentCaptured'. The read side subscribes to those events and updates its projection. This is usually done with Kafka or a message bus. The read model is a derived view — it's rebuilt from events. If it gets corrupted or you change its schema, you replay events from scratch and rebuild it. That's the superpower of event-driven CQRS."
+
+---
+
+### "When does CQRS make things worse?"
+
+> "When the domain is simple. If I have a basic CRUD app with straightforward reads and writes, adding CQRS adds complexity — two models, event infrastructure, eventual consistency to reason about — for zero benefit. CQRS is most valuable when reads and writes have genuinely different performance or modeling requirements, or when you need multiple specialized read models of the same data. For a startup doing basic CRUD, I'd say skip it. For a high-read-traffic platform where reads need to be optimized independently of writes — that's the sweet spot."
+
+---
+
+### Quick Cheat Sheet
+
+| Question | One-line answer |
+|---|---|
+| What is CQRS? | Separate read model (queries) from write model (commands) |
+| Why separate? | Reads and writes have different scaling, modeling, and optimization needs |
+| How are they synced? | Domain events published on write, consumed by read projections |
+| Tradeoff? | Eventual consistency — reads may lag behind writes |
+| When to use? | High-traffic reads, multiple read models needed, complex write invariants |
+| When NOT to use? | Simple CRUD with low complexity — adds overhead for no gain |
+

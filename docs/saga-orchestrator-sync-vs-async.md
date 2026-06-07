@@ -134,3 +134,33 @@ It demonstrates both:
 
 1. Sync happy path and D-failure rollback
 2. Async happy path and D-failure rollback
+
+---
+
+## How to Talk About Saga Sync vs Async Orchestration in an Interview (Human English)
+
+---
+
+### "How do you decide between synchronous and asynchronous saga orchestration?"
+
+> "The short answer is: sync for simple, low-latency flows. Async for long-running, failure-heavy, resilient flows. In sync orchestration, the orchestrator calls each service and waits — it's basically a blocking chain of HTTP calls. Simple to implement, easy to trace in one request span, good when services are fast and reliable. The problem is you're tightly coupled at runtime — if service B is slow, service A's thread is blocked waiting. Doesn't scale well with many steps or unreliable dependencies. In async orchestration, the orchestrator sends command events to Kafka and services reply with result events. The orchestrator stores its state durably and reacts to replies. No blocking threads. You can absorb retries, partial failures, and service restarts transparently. The tradeoff is complexity — you need state machines, durable saga state, idempotency everywhere, and strong correlation IDs to trace what happened."
+
+---
+
+### "What's a compensating transaction and when does it run?"
+
+> "A compensating transaction is the 'undo' action for a step. If the saga reaches step D and D fails, the orchestrator runs compensations in reverse order: undo C, undo B, undo A. The key thing to understand is that compensations are NOT the same as a database rollback — they're new forward business actions that semantically reverse the previous action. 'Undo reserve inventory' means 'release the reservation'. 'Undo capture payment' means 'issue a refund'. And they must be idempotent — if the compensation is retried, running it twice should be safe."
+
+---
+
+### Quick Cheat Sheet
+
+| Question | One-line answer |
+|---|---|
+| Sync orchestration? | Sequential HTTP calls — simple but tightly coupled at runtime |
+| Async orchestration? | Command events + durable state — resilient but complex |
+| When sync? | Short flows, fast services, low failure rate |
+| When async? | Long-running, high failure rate, need retry/resume capability |
+| What is compensation? | Business-level undo action — NOT a DB rollback, must be idempotent |
+| Key requirement for async? | Durable saga state + idempotency + strong correlation IDs |
+

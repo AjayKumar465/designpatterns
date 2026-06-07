@@ -1511,55 +1511,66 @@ Is the legacy system causing pain?
 
 ---
 
-## How to Talk About the Strangler Fig Pattern in an Interview (Human English)
+## How to Talk About the Strangler Fig Pattern in an Interview
 
-> This section is how you'd explain this pattern in a real interview conversation — natural, clear, with the reasoning behind the decisions.
+> Say it like this. Plain words. How you would explain it to someone over coffee.
 
 ---
 
 ### "What is the Strangler Fig pattern?"
 
-> "The name comes from a real tree — a strangler fig grows around a host tree, slowly wraps it, and eventually the host dies and the fig tree stands on its own. In software, it's the same idea. You have a legacy monolith running in production. You can't stop the world and rewrite it from scratch — that's a big-bang rewrite and it almost always fails. Instead, you put a routing facade in front of the monolith. You incrementally build new microservices beside it. You route traffic to the new service gradually — maybe 5% first, then 50%, then 100%. The monolith slowly gets 'strangled' — feature by feature, until nothing is calling it anymore and you shut it down."
+So you have an old system — a monolith, messy code, whatever. You need to move to something better. But you cannot just stop everything and rewrite it. That takes too long and too much can go wrong.
 
-**Real analogy:**
-> "Think of it like replacing the engine in a car while it's driving. You can't stop the car. But you can add a new engine beside the old one, gradually transfer load, and eventually remove the old one — without the passengers ever noticing."
+Strangler Fig says — don't replace it all at once. Put a router in front. Build the new parts on the side. Slowly send more and more traffic to the new service. When the new one handles everything, turn off the old one.
+
+The old system gets less and less work until it dies on its own. Like a tree being slowly taken over.
 
 ---
 
 ### "How does the routing work?"
 
-> "You put a facade in front — a reverse proxy, an API gateway, something like Spring Cloud Gateway or Nginx, or even a service mesh like Istio. Initially it routes 100% to the monolith. As you build new services, you flip the routing. Start with low-risk, well-defined features first — something bounded, not tangled with 20 other things. Once the new service is proven in production — good metrics, correct behavior, passing parity tests — you increase traffic. It's canary deployment but for migration, not for feature flags."
+You put something in front — an API gateway, a proxy, something like Nginx or Spring Cloud Gateway. It looks at each request and decides where to send it. Old system or new one.
+
+You start by sending everything to the old system. As you build new services, you shift the routing. Maybe 10% to the new one first. Then 50%. Then 100%.
+
+You can also run both at the same time and compare results. That way you know the new one gives the right answer before you fully commit.
 
 ---
 
-### "What's the hardest part of this pattern?"
+### "What is the hardest part?"
 
-> "Data migration is the real challenge — nobody talks about it enough. It's easy to move business logic. It's hard to move data. If the new service needs its own database but the monolith still owns the source of truth, you end up doing dual writes or CDC (Change Data Capture with something like Debezium). During the transition period, you have two systems claiming ownership. You need reconciliation jobs to detect drift. It's messy. This is why I always say: extract one bounded context at a time, clean up the data ownership before moving to the next domain."
+The data. Moving code is easy. The hard part is — if the new service has its own database, how do you keep it in sync with the old system during the switch?
 
----
+You might end up writing to both databases at the same time for a while. Or you use a tool like Debezium to sync changes automatically.
 
-### "How do you prevent the new service from depending on monolith internals?"
-
-> "Anti-Corruption Layer — ACL. The new service defines its own domain model. When it needs data from the monolith, it goes through an adapter that translates — so if the monolith changes its internal model, you update the adapter, not the new service. It's the same concept as an interface between two worlds so neither leaks into the other. This is how you maintain clean domain boundaries during the transition period."
+Either way you have two systems running at once and you need to make sure they stay in sync. That is the messy part.
 
 ---
 
-### "When would you NOT use this pattern?"
+### "What is the Anti-Corruption Layer?"
 
-> "If the monolith is genuinely small and the team has capacity to do a proper bounded rewrite — maybe you don't need Strangler Fig, you just carve out services cleanly. Strangler Fig has overhead: you need to maintain two systems simultaneously, you need parity testing, you need the facade layer. If the monolith is already mostly decomposed or it's small enough for a two-week rewrite, the pattern adds more complexity than it removes. It's really designed for large, entangled systems that have to keep running while you fix them."
+When the new service needs data from the old system, it should not use the old system's format directly. If the old system changes how it stores something, you don't want the new service to break.
+
+So you put a translation step in between. The new service talks to the translator. The translator talks to the old system. Changes in the old system only affect the translator, not the new service.
 
 ---
 
-### Quick Cheat Sheet for Verbal Answers
+### "When would you NOT do this?"
 
-| Question | One-line answer |
+If the old system is small and you can rewrite it in two weeks, just rewrite it. Strangler Fig means running two systems at the same time for a while. That is extra work. Extra testing. Extra things to monitor.
+
+It makes sense for big complicated systems that need to stay live while you fix them. For small systems, it is just more work than it is worth.
+
+---
+
+### Quick Answers
+
+| Question | Say this |
 |---|---|
-| What is Strangler Fig? | Incrementally replace a monolith by routing traffic to new services, piece by piece |
-| What is the Facade? | The routing layer (API Gateway, reverse proxy) that decides: old or new? |
-| What is the ACL? | Anti-Corruption Layer — translates between monolith and new service models |
-| What is the hardest part? | Data migration — who owns the source of truth during transition |
-| How do you test correctness? | Shadow traffic (run both, compare results) and parity tests |
-| When to stop? | When no traffic flows to the monolith — then decommission |
-| Big-bang vs Strangler Fig? | Big-bang = full rewrite, high risk, long freeze. Strangler = incremental, live in prod |
-| What's dual write? | Writing to both old DB and new DB during migration — needs reconciliation |
+| What is Strangler Fig? | Replace a monolith piece by piece while it is still running |
+| What is the facade? | The router that decides — old system or new service? |
+| What is the hardest part? | Moving the data — figuring out who owns the source of truth |
+| What is an ACL? | A translation layer so the old system's model does not leak into the new one |
+| When to stop? | When nothing is going to the old system anymore — then shut it down |
+| Big-bang vs Strangler Fig? | Big-bang rewrites are risky and often fail. Strangler Fig is gradual and safer |
 

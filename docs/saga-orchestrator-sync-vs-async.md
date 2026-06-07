@@ -137,30 +137,45 @@ It demonstrates both:
 
 ---
 
-## How to Talk About Saga Sync vs Async Orchestration in an Interview (Human English)
+## How to Talk About Saga Sync vs Async Orchestration in an Interview
+
+> Short and plain. How you would say it.
 
 ---
 
-### "How do you decide between synchronous and asynchronous saga orchestration?"
+### "Sync vs Async orchestration — which do you use and why?"
 
-> "The short answer is: sync for simple, low-latency flows. Async for long-running, failure-heavy, resilient flows. In sync orchestration, the orchestrator calls each service and waits — it's basically a blocking chain of HTTP calls. Simple to implement, easy to trace in one request span, good when services are fast and reliable. The problem is you're tightly coupled at runtime — if service B is slow, service A's thread is blocked waiting. Doesn't scale well with many steps or unreliable dependencies. In async orchestration, the orchestrator sends command events to Kafka and services reply with result events. The orchestrator stores its state durably and reacts to replies. No blocking threads. You can absorb retries, partial failures, and service restarts transparently. The tradeoff is complexity — you need state machines, durable saga state, idempotency everywhere, and strong correlation IDs to trace what happened."
+Sync orchestration is like making phone calls one by one. You call Service A, wait for the answer, then call Service B, wait, then C. Simple to follow. Easy to debug in one trace.
+
+The downside is if any step is slow, the whole thing waits. And if a service is down when you call it, you have a problem right there.
+
+Async orchestration is like sending messages and waiting for replies. You send a command, continue doing other things, and react when the reply comes. More resilient because services don't have to be available at the exact same moment.
+
+The tradeoff is complexity. You need to store the saga state durably. You need to handle retries and duplicates. Debugging needs good correlation IDs so you can trace the full flow.
+
+I use sync for short, simple flows where services are reliable. Async for longer flows or when services can be slow or temporarily down.
 
 ---
 
-### "What's a compensating transaction and when does it run?"
+### "What is a compensating action?"
 
-> "A compensating transaction is the 'undo' action for a step. If the saga reaches step D and D fails, the orchestrator runs compensations in reverse order: undo C, undo B, undo A. The key thing to understand is that compensations are NOT the same as a database rollback — they're new forward business actions that semantically reverse the previous action. 'Undo reserve inventory' means 'release the reservation'. 'Undo capture payment' means 'issue a refund'. And they must be idempotent — if the compensation is retried, running it twice should be safe."
+If the saga reaches step 3 and something fails, you need to undo step 1 and step 2.
+
+The undo step is the compensating action. It's a real business action — not a database rollback.
+
+Like if step 1 was "reserve inventory", the undo is "release the reservation".
+
+The key rule is — the undo step must be safe to run more than once. The system might retry it, and you can't accidentally run it twice and cause a double-refund or something like that.
 
 ---
 
-### Quick Cheat Sheet
+### Quick Answers
 
-| Question | One-line answer |
+| Question | Say this |
 |---|---|
-| Sync orchestration? | Sequential HTTP calls — simple but tightly coupled at runtime |
-| Async orchestration? | Command events + durable state — resilient but complex |
-| When sync? | Short flows, fast services, low failure rate |
-| When async? | Long-running, high failure rate, need retry/resume capability |
-| What is compensation? | Business-level undo action — NOT a DB rollback, must be idempotent |
-| Key requirement for async? | Durable saga state + idempotency + strong correlation IDs |
+| Sync orchestration? | Call services one by one and wait — simple but tightly coupled |
+| Async orchestration? | Send events, store state, react to replies — resilient but more complex |
+| When to use sync? | Short flows, fast services, few steps |
+| When to use async? | Long flows, services can be slow or offline, high retry rate |
+| What is compensation? | The undo step for a completed action — must be safe to repeat |
 

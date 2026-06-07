@@ -102,42 +102,53 @@ Yes, there are alternatives.
 
 ---
 
-## How to Talk About LRU Cache in an Interview (Human English)
+## How to Talk About LRU Cache in an Interview
+
+> Plain and direct. How you would explain it on a whiteboard.
 
 ---
 
 ### "What is an LRU Cache?"
 
-> "LRU stands for Least Recently Used. It's a cache with a fixed capacity where, when you need to add something new and the cache is full, you evict the item that was accessed least recently. The idea is that if you haven't touched something in a while, you're probably not going to need it soon. Classic use case: database query results, expensive computation results, API responses — things that are expensive to regenerate. Instead of hitting the DB every time, you check the cache first. If it's there, return it. If not, compute it, cache it, and evict the oldest thing if you're at capacity."
+LRU means Least Recently Used. It's a cache with a fixed size.
+
+When the cache is full and you add something new, it removes the item you haven't touched for the longest time. The idea is — if you haven't used something in a while, you probably won't need it soon.
+
+Common use is caching database results. Instead of hitting the database every time, you check the cache first. Fast response, less load on the database.
 
 ---
 
-### "How would you implement it efficiently?"
+### "How would you implement it?"
 
-> "You need O(1) lookup and O(1) eviction. The key insight is: you need to quickly find an item by key, AND you need to quickly know which item is the least recently used. A HashMap alone gives you O(1) lookup but you don't know the order. A linked list gives you order but lookup is O(n). Combine them: HashMap for lookup, doubly linked list for order. The map stores a reference directly to the node in the list — so finding an item is O(1) via the map, and moving it to the front of the list (marking it as recently used) is O(1) pointer manipulation. Eviction is O(1) — just remove the tail of the list. The elegant shortcut in Java is `LinkedHashMap` with `accessOrder=true` and override `removeEldestEntry` — that's LRU in about 3 lines."
+You need two things working together.
 
----
+First — a HashMap for fast lookup. You can find any item instantly.
 
-### "What's the time complexity?"
+Second — a doubly linked list to track order. The most recently used item is at the front. The least recently used is at the back. When you use an item, you move it to the front. When you need to evict something, you remove from the back.
 
-> "Both `get` and `put` are O(1). That's the whole point — you're paying O(capacity) space to get constant time operations. If you use a sorted structure or scan for the LRU on every operation, it degrades to O(log n) or O(n) and you lose the cache's performance advantage."
+Both operations are instant — O(1). That's the whole point.
+
+In Java, the easy way is to use `LinkedHashMap` with `accessOrder=true`. It handles all of this for you.
 
 ---
 
 ### "What about thread safety?"
 
-> "The basic implementation with HashMap + doubly linked list is single-threaded. In production, if multiple threads are reading and writing, you need synchronization. The simplest fix is a `synchronized` wrapper around the whole cache — but that's a bottleneck. A better approach for high-concurrency is striped locking or using Caffeine, which is a high-performance production cache library with built-in LRU/LFU, expiry, and load-on-miss. In real production code I almost never implement LRU from scratch — I use Caffeine or Guava Cache. But knowing how to implement it is what interviewers want to verify."
+The basic version is not safe for multiple threads. If two threads use it at the same time, things break.
+
+The simple fix is to put a lock on the whole cache. But only one thread at a time can use it then.
+
+In real production code I would use Caffeine. It's a high-performance cache library that handles all of this properly. I wouldn't build LRU from scratch in production — but knowing how it works is what the interview question is really about.
 
 ---
 
-### Quick Cheat Sheet
+### Quick Answers
 
-| Question | One-line answer |
+| Question | Say this |
 |---|---|
-| What is LRU? | Fixed-size cache that evicts the least recently accessed item when full |
-| Data structures? | HashMap (O(1) lookup) + Doubly Linked List (O(1) order + eviction) |
-| Complexity? | O(1) get, O(1) put, O(capacity) space |
-| Java built-in? | `LinkedHashMap(capacity, loadFactor, true)` with `removeEldestEntry` override |
-| Production cache? | Use Caffeine — high-performance, concurrent, configurable eviction and expiry |
-| Thread safety? | Basic impl is not thread-safe — use Caffeine or explicit synchronization |
+| What is LRU? | A cache that removes the item used least recently when it gets full |
+| Data structures? | HashMap for fast lookup + doubly linked list for order tracking |
+| Time complexity? | O(1) for both get and put |
+| Java built-in option? | LinkedHashMap with accessOrder=true and removeEldestEntry override |
+| Production choice? | Use Caffeine — it's fast, thread-safe, and configurable |
 

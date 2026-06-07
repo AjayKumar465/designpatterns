@@ -249,39 +249,51 @@ See `examples/outbox/OutboxDemo.java` for concept demonstration.
 
 ---
 
-## How to Talk About the Transactional Outbox Pattern in an Interview (Human English)
+## How to Talk About the Transactional Outbox Pattern in an Interview
+
+> Short and clear. How you would actually say it.
 
 ---
 
-### "What is the Transactional Outbox pattern and why does it exist?"
+### "What problem does the Outbox pattern solve?"
 
-> "The problem it solves is called the dual-write problem. In a microservices system, a service often needs to do two things atomically: save data to its database AND publish an event to Kafka. But these are two separate systems — there's no global transaction spanning both. So if you write to the DB and then Kafka goes down, the event never gets published. Or you publish to Kafka first, and then the DB write fails — now downstream services processed an event for data that doesn't exist. The Outbox pattern solves this by writing the event record into the same database as your business data, in the same transaction. Then a separate relay process reads from that outbox table and publishes to Kafka. The DB transaction is your atomicity guarantee. The relay handles eventual delivery."
+You need to save something to your database AND send a message to Kafka. These are two separate things.
 
-**Good analogy:**
-> "Imagine writing a letter — you need to both record in your journal that you sent it AND actually mail it. If you mail it first and then your journal is lost, you don't know you sent it. If you write in the journal first and then forget to mail it, the recipient never gets it. The outbox pattern says: write the letter and the journal entry at the same time (one transaction), then separately go mail it."
+If you save to the database and then Kafka goes down, the message never gets sent.
+
+If you send to Kafka first and then the database save fails, Kafka has a message for data that doesn't exist.
+
+The outbox pattern fixes this. You write your data AND the message into your own database in the same transaction. Then a background job reads that message from the database and sends it to Kafka. The transaction makes sure both things happen together or not at all.
 
 ---
 
-### "What does the relay do and how does it handle failures?"
+### "How does the background job work?"
 
-> "The relay polls the outbox table for `PENDING` records, publishes each to Kafka, and marks them `SENT`. It uses `FOR UPDATE SKIP LOCKED` so multiple relay instances don't double-process the same row. If Kafka is down, the event stays `PENDING` and the relay retries with exponential backoff. After a configurable number of retries, it marks the event `FAILED` and alerts ops. The consumer side must be idempotent because the relay may publish the same event twice (e.g., relay crashes after publishing but before marking `SENT`). The `event_id` header on every message lets consumers deduplicate."
+The job checks the outbox table for messages that haven't been sent yet. It sends each one to Kafka. Then it marks it as sent.
+
+If Kafka is down, the message stays in the table. The job retries later.
+
+If the job crashes after sending but before marking it as sent, it will send the same message again when it restarts. So the consumer might get the same message twice. That's fine — the consumer just needs to handle duplicates.
 
 ---
 
 ### "CDC vs polling relay — which do you use?"
 
-> "If the team already runs Debezium and Kafka Connect, CDC is cleaner — it reads the DB binlog (transaction log), so there's no polling latency and no extra queries on the main DB. But if you're a small team without platform infrastructure for Connect, a polling relay inside your own service is simpler to own and debug. I've built both. My default for a new service is polling relay — it's 50 lines of code and you own it. I graduate to CDC when the throughput outgrows polling or when a platform team takes over the infra."
+Polling is simpler. Your job queries the table every few seconds. Easy to build and own.
+
+CDC reads the database transaction log directly. It reacts to changes immediately. Faster, but needs extra tools like Debezium.
+
+I usually start with polling. If the volume gets high or the delay matters, I switch to CDC.
 
 ---
 
-### Quick Cheat Sheet
+### Quick Answers
 
-| Question | One-line answer |
+| Question | Say this |
 |---|---|
-| What problem does it solve? | Dual-write: writing to DB and publishing to Kafka atomically |
-| How? | Write event to outbox table in same DB transaction; relay publishes asynchronously |
-| What if relay fails? | Event stays PENDING, relay retries with backoff |
-| Consumer idempotency needed? | Yes — relay can publish duplicates on crash/restart |
-| CDC vs polling? | CDC = low latency, needs Debezium. Polling = simpler, good for moderate throughput |
-| What to monitor? | Pending event age, retry count, terminal failures |
+| What problem does it solve? | You need to save data and publish an event atomically — this does both in one DB transaction |
+| How does it work? | Write event to outbox table in same transaction, relay sends it to Kafka separately |
+| What if relay crashes? | Message stays in table, relay retries on restart |
+| Why handle duplicates on consumer side? | Relay can send the same message twice — consumer must ignore the second one |
+| CDC or polling? | Polling for simplicity, CDC for speed and high volume |
 

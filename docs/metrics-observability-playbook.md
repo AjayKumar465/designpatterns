@@ -22,16 +22,17 @@
 13. [MeterBinder — Reusable Metric Modules](#13-meterbinder--reusable-metric-modules)
 14. [Observation API (Spring Boot 3+) — Unified Metrics + Tracing](#14-observation-api-spring-boot-3--unified-metrics--tracing)
 15. [Spring Boot Auto-Configured Metrics — What You Get for Free](#15-spring-boot-auto-configured-metrics--what-you-get-for-free)
-16. [Prometheus Integration — Scraping, Storage, Architecture](#16-prometheus-integration--scraping-storage-architecture)
-17. [PromQL — Essential Queries for Spring Boot](#17-promql--essential-queries-for-spring-boot)
-18. [Grafana Dashboards & Alerting](#18-grafana-dashboards--alerting)
-19. [OpenTelemetry vs Micrometer — When to Use What](#19-opentelemetry-vs-micrometer--when-to-use-what)
-20. [Naming Conventions & Best Practices](#20-naming-conventions--best-practices)
-21. [Testing Metrics](#21-testing-metrics)
-22. [Production Configuration — Complete Setup](#22-production-configuration--complete-setup)
-23. [Production Anti-Patterns & Pitfalls](#23-production-anti-patterns--pitfalls)
-24. [Production Issue Runbook](#24-production-issue-runbook)
-25. [Lead Interview Questions & Answers](#25-lead-interview-questions--answers)
+16. [Spring Boot + Prometheus Setup — Endpoints & Custom Metrics](#16-spring-boot--prometheus-setup--endpoints--custom-metrics)
+17. [Prometheus Integration — Scraping, Storage, Architecture](#17-prometheus-integration--scraping-storage-architecture)
+18. [PromQL — Essential Queries for Spring Boot](#18-promql--essential-queries-for-spring-boot)
+19. [Grafana Dashboards & Alerting](#19-grafana-dashboards--alerting)
+20. [OpenTelemetry vs Micrometer — When to Use What](#20-opentelemetry-vs-micrometer--when-to-use-what)
+21. [Naming Conventions & Best Practices](#21-naming-conventions--best-practices)
+22. [Testing Metrics](#22-testing-metrics)
+23. [Production Configuration — Complete Setup](#23-production-configuration--complete-setup)
+24. [Production Anti-Patterns & Pitfalls](#24-production-anti-patterns--pitfalls)
+25. [Production Issue Runbook](#25-production-issue-runbook)
+26. [Lead Interview Questions & Answers](#26-lead-interview-questions--answers)
 
 ---
 
@@ -732,6 +733,8 @@ public MeterFilter defaultFilter() { ... }
 
 ## 11. Custom Business Metrics — Production-Grade Patterns
 
+> **How to expose custom metrics:** You do not create a separate endpoint. Register metrics with Micrometer in code — they automatically appear on `/actuator/prometheus`. See [Section 16](#16-spring-boot--prometheus-setup--endpoints--custom-metrics) for the full step-by-step setup.
+
 ### Pattern: Dedicated Metrics Component
 
 Separate metrics concerns from business logic.
@@ -1180,7 +1183,334 @@ Auto-instruments repository method calls with timing.
 
 ---
 
-## 16. Prometheus Integration — Scraping, Storage, Architecture
+## 16. Spring Boot + Prometheus Setup — Endpoints & Custom Metrics
+
+This section answers the most common setup questions: **what dependencies to add**, **Micrometer vs Prometheus**, **which endpoints exist**, **how to expose custom metrics**, and **logs in Kibana vs metrics in Prometheus**.
+
+---
+
+### Micrometer vs Prometheus — Who Does What?
+
+Both are needed. They do different jobs.
+
+| | Micrometer | Prometheus |
+|---|---|---|
+| **What it is** | Java library inside your app | Monitoring server (separate process) |
+| **Job** | Create and hold metrics in memory | Scrape, store, query, and alert on metrics |
+| **Where it runs** | Inside Spring Boot | Its own server / pod |
+| **Analogy** | Speedometer in the car | Garage dashboard that collects speed from all cars |
+
+```
+Spring Boot App                          Prometheus Server
+┌─────────────────────┐                  ┌─────────────────────┐
+│  Your code          │                  │  Scrapes every 15s  │
+│  Counter.increment()│                  │  Stores in TSDB     │
+│         ↓           │   HTTP GET       │  PromQL queries     │
+│  Micrometer         │ ◄─────────────── │  Grafana + alerts   │
+│  /actuator/prometheus                  └─────────────────────┘
+└─────────────────────┘
+```
+
+**Rule:** Micrometer = producer. Prometheus = collector + database + query engine.
+
+---
+
+### Starter vs Dependency — What's the Difference?
+
+Both go in `pom.xml`. A **starter** is a special dependency that bundles libraries + auto-configuration.
+
+| Dependency | Type | What it does |
+|---|---|---|
+| `spring-boot-starter-actuator` | **Starter** | Brings actuator + Micrometer core; auto-configures `/health`, `/metrics`, etc. |
+| `micrometer-registry-prometheus` | **Regular dependency** | Adds Prometheus export format; enables `/actuator/prometheus` |
+
+```xml
+<!-- Starter: bundle + auto-setup -->
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-actuator</artifactId>
+</dependency>
+
+<!-- Regular dependency: one specific adapter -->
+<dependency>
+    <groupId>io.micrometer</groupId>
+    <artifactId>micrometer-registry-prometheus</artifactId>
+    <scope>runtime</scope>   <!-- not needed at compile time -->
+</dependency>
+```
+
+Without the starter → no actuator endpoints, no base metrics.  
+Without the prometheus registry → metrics exist but not in Prometheus format.
+
+---
+
+### What Is TSDB? Prometheus Metric Types
+
+**TSDB = Time Series Database.** It stores values with timestamps (`10:00:01 → CPU 45%`, `10:00:02 → CPU 47%`). Prometheus uses a TSDB to store metrics.
+
+Prometheus has **4 metric types**:
+
+| Type | Behavior | Use for | Example |
+|---|---|---|---|
+| **Counter** | Only goes up | Count events | `orders_placed_total` |
+| **Gauge** | Goes up and down | Current value | `jvm_memory_used_bytes`, queue size |
+| **Histogram** | Distribution in buckets | Latency, size | `http_server_requests_seconds_bucket` |
+| **Summary** | Pre-computed percentiles in app | Rare in production | Prefer Histogram instead |
+
+Micrometer maps to Prometheus:
+
+| Micrometer | Prometheus type |
+|---|---|
+| Counter | Counter |
+| Gauge | Gauge |
+| Timer | Histogram or Summary |
+| DistributionSummary | Histogram or Summary |
+
+---
+
+### Spring Boot Actuator Endpoints for Metrics
+
+Prometheus scrapes **one main endpoint**. Other actuator endpoints are for humans and ops.
+
+| Endpoint | Format | Who uses it | Purpose |
+|---|---|---|---|
+| **`/actuator/prometheus`** | Prometheus text | **Prometheus server** | All metrics — scrape target |
+| `/actuator/metrics` | JSON | You / debugging | List metric names |
+| `/actuator/metrics/{name}` | JSON | You / debugging | One metric details |
+| `/actuator/health` | JSON | K8s / load balancer | UP/DOWN status |
+| `/actuator/health/liveness` | JSON | Kubernetes | Liveness probe |
+| `/actuator/health/readiness` | JSON | Kubernetes | Readiness probe |
+| `/actuator/info` | JSON | Ops | App version info |
+| `/actuator/env` | JSON | ⚠️ Sensitive | Environment variables |
+| `/actuator/heapdump` | Binary | ⚠️ Sensitive | Heap dump download |
+
+**`/actuator/metrics` vs `/actuator/prometheus`:**
+
+| | `/actuator/metrics` | `/actuator/prometheus` |
+|---|---|---|
+| Format | JSON | Prometheus text |
+| Used by | curl, browser, debugging | Prometheus, Grafana |
+| Good for | Quick check one metric | Production monitoring |
+
+---
+
+### Enable Prometheus Endpoint — application.yml
+
+```yaml
+management:
+  server:
+    port: 8081                    # optional: separate management port
+  endpoints:
+    web:
+      base-path: /actuator
+      exposure:
+        include: health, prometheus, metrics   # expose what you need
+  endpoint:
+    prometheus:
+      enabled: true
+```
+
+Production minimum:
+
+```yaml
+management:
+  server:
+    port: 8081
+  endpoints:
+    web:
+      exposure:
+        include: health, prometheus    # never use include: "*" in prod
+  endpoint:
+    health:
+      show-details: never
+```
+
+Prometheus scrape config:
+
+```yaml
+scrape_configs:
+  - job_name: 'spring-boot-app'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['localhost:8081']
+```
+
+---
+
+### Exposing Custom Metrics — No Separate Endpoint Needed
+
+**Important:** You do **not** create a new endpoint per custom metric.
+
+Flow:
+
+1. Register metric with Micrometer in Java code
+2. Call `.increment()` / `.record()` in business logic
+3. Metric automatically appears on `/actuator/prometheus`
+4. Prometheus scrapes it
+
+#### Step 1 — Counter (how many times something happened)
+
+```java
+@Service
+public class OrderService {
+
+    private final Counter ordersPlaced;
+
+    public OrderService(MeterRegistry registry) {
+        this.ordersPlaced = Counter.builder("orders.placed.total")
+            .description("Total orders placed")
+            .tag("status", "success")
+            .register(registry);
+    }
+
+    public Order placeOrder(OrderRequest request) {
+        Order order = doPlaceOrder(request);
+        ordersPlaced.increment();
+        return order;
+    }
+}
+```
+
+#### Step 2 — Timer (how long something took)
+
+```java
+@Service
+public class PaymentService {
+
+    private final Timer paymentTimer;
+
+    public PaymentService(MeterRegistry registry) {
+        this.paymentTimer = Timer.builder("payment.processing.duration")
+            .description("Payment processing time")
+            .publishPercentileHistogram()   // enables p95/p99 in Prometheus
+            .minimumExpectedValue(Duration.ofMillis(1))
+            .maximumExpectedValue(Duration.ofSeconds(10))
+            .register(registry);
+    }
+
+    public PaymentResult process(PaymentRequest request) {
+        return paymentTimer.record(() -> gateway.charge(request));
+    }
+}
+```
+
+#### Step 3 — Gauge (current value, goes up and down)
+
+```java
+@Component
+public class QueueMetrics {
+    public QueueMetrics(MeterRegistry registry, BlockingQueue<Task> taskQueue) {
+        registry.gauge("task.queue.size", taskQueue, BlockingQueue::size);
+    }
+}
+```
+
+#### Step 4 — Dedicated metrics class (production pattern)
+
+See [Section 11](#11-custom-business-metrics--production-grade-patterns) for `OrderMetrics` component pattern.
+
+#### Step 5 — Verify custom metrics
+
+```bash
+# List all metric names (JSON)
+curl http://localhost:8081/actuator/metrics
+
+# One metric in JSON
+curl http://localhost:8081/actuator/metrics/orders.placed.total
+
+# All metrics in Prometheus format (what Prometheus scrapes)
+curl http://localhost:8081/actuator/prometheus | grep orders
+```
+
+Expected Prometheus output (dots become underscores):
+
+```text
+orders_placed_total{status="success"} 42.0
+payment_processing_duration_seconds_count 42.0
+payment_processing_duration_seconds_sum 12.5
+payment_processing_duration_seconds_bucket{le="0.1"} 30.0
+```
+
+PromQL to query custom counter:
+
+```promql
+rate(orders_placed_total[5m])
+```
+
+---
+
+### Optional — Custom Actuator Endpoint (Rare)
+
+Only if you need a **dedicated JSON endpoint** for ops — **not** for Prometheus scraping.
+
+```java
+@Component
+@Endpoint(id = "orderstats")
+public class OrderStatsEndpoint {
+
+    private final MeterRegistry registry;
+
+    public OrderStatsEndpoint(MeterRegistry registry) {
+        this.registry = registry;
+    }
+
+    @ReadOperation
+    public Map<String, Object> orderStats() {
+        Counter counter = registry.find("orders.placed.total").counter();
+        return Map.of(
+            "ordersPlaced", counter != null ? counter.count() : 0
+        );
+    }
+}
+```
+
+```yaml
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, prometheus, orderstats
+```
+
+Call: `GET /actuator/orderstats` — Prometheus still uses `/actuator/prometheus` only.
+
+---
+
+### Logs in Kibana vs Metrics in Prometheus
+
+Many teams use **Kibana for logs** and **Prometheus + Grafana for metrics**. They are separate but complementary.
+
+| | Kibana (Elastic) | Prometheus + Grafana |
+|---|---|---|
+| **Primary use** | Log search and analysis | Metrics, alerts, dashboards |
+| **Data** | Log lines with traceId | Time-series numbers |
+| **Spring Boot setup** | Filebeat / Logstash → Elasticsearch | Micrometer → `/actuator/prometheus` |
+| **When to use together** | Debug a request (logs) + see latency trend (metrics) | Correlation via shared `traceId` |
+
+Common setups:
+
+1. **Hybrid (most common):** Logs → Kibana. Metrics → Prometheus → Grafana.
+2. **Full Elastic:** Metricbeat + Elastic APM → Elasticsearch → Kibana Observability.
+3. **Unified OTLP:** Micrometer OTLP export → OpenTelemetry Collector → Elastic or Prometheus.
+
+Ask your team: *"Where do our app metrics live — Elastic Observability or Prometheus/Grafana?"*
+
+---
+
+### Custom Metrics Checklist
+
+- [ ] `spring-boot-starter-actuator` in pom.xml
+- [ ] `micrometer-registry-prometheus` in pom.xml (runtime scope)
+- [ ] `management.endpoints.web.exposure.include` includes `prometheus`
+- [ ] Custom metric registered via `Counter.builder(...).register(registry)`
+- [ ] `.increment()` / `.record()` called in business code
+- [ ] Verified: `curl /actuator/prometheus | grep your_metric`
+- [ ] Prometheus scrape config points to `/actuator/prometheus`
+- [ ] Tags use bounded values only (no user IDs, order IDs as tags)
+
+---
+
+## 17. Prometheus Integration — Scraping, Storage, Architecture
 
 ### Architecture
 
@@ -1314,7 +1644,7 @@ groups:
 
 ---
 
-## 17. PromQL — Essential Queries for Spring Boot
+## 18. PromQL — Essential Queries for Spring Boot
 
 ### Request Rate (Throughput)
 
@@ -1436,7 +1766,7 @@ orders_pending_count
 
 ---
 
-## 18. Grafana Dashboards & Alerting
+## 19. Grafana Dashboards & Alerting
 
 ### Essential Dashboards
 
@@ -1504,7 +1834,7 @@ $uri         = label_values(http_server_requests_seconds_count{application="$app
 
 ---
 
-## 19. OpenTelemetry vs Micrometer — When to Use What
+## 20. OpenTelemetry vs Micrometer — When to Use What
 
 ### Comparison
 
@@ -1555,7 +1885,7 @@ This gives you Micrometer's familiar API with OpenTelemetry's protocol and backe
 
 ---
 
-## 20. Naming Conventions & Best Practices
+## 21. Naming Conventions & Best Practices
 
 ### Micrometer Naming
 
@@ -1635,7 +1965,7 @@ management:
 
 ---
 
-## 21. Testing Metrics
+## 22. Testing Metrics
 
 ### Unit Testing with SimpleMeterRegistry
 
@@ -1743,7 +2073,7 @@ class MetricsFilterTest {
 
 ---
 
-## 22. Production Configuration — Complete Setup
+## 23. Production Configuration — Complete Setup
 
 ### application.yml
 
@@ -1902,7 +2232,7 @@ volumes:
 
 ---
 
-## 23. Production Anti-Patterns & Pitfalls
+## 24. Production Anti-Patterns & Pitfalls
 
 ### Anti-Pattern 1: High-Cardinality Tags → OOM
 
@@ -2045,7 +2375,7 @@ Gauge.builder("connections.active", activeConnections, AtomicInteger::get).regis
 
 ---
 
-## 24. Production Issue Runbook
+## 25. Production Issue Runbook
 
 ### Issue: Prometheus Scrape Timeouts
 
@@ -2136,7 +2466,7 @@ rate(hikaricp_connections_timeout_total[5m]) > 0
 
 ---
 
-## 25. Lead Interview Questions & Answers
+## 26. Lead Interview Questions & Answers
 
 ### Fundamentals (5 questions)
 
@@ -2178,7 +2508,7 @@ rate(hikaricp_connections_timeout_total[5m]) > 0
 
 **Q9: When would you choose OpenTelemetry over Micrometer?**
 
-**A**: I'd choose OpenTelemetry when: (1) I have a polyglot system (Go, Python, Java) and need consistent instrumentation. (2) I need full distributed tracing with W3C Trace Context. (3) I want a unified pipeline for metrics, traces, and logs via OTLP. I'd stick with Micrometer when: (1) It's a Spring-only stack. (2) I only need metrics. (3) I want minimal setup with Actuator. The hybrid approach — Micrometer API with OTLP export (`micrometer-registry-otlp`) — gives the best of both worlds: familiar Spring APIs with OpenTelemetry protocol and backend flexibility. *(Section 19)*
+**A**: I'd choose OpenTelemetry when: (1) I have a polyglot system (Go, Python, Java) and need consistent instrumentation. (2) I need full distributed tracing with W3C Trace Context. (3) I want a unified pipeline for metrics, traces, and logs via OTLP. I'd stick with Micrometer when: (1) It's a Spring-only stack. (2) I only need metrics. (3) I want minimal setup with Actuator. The hybrid approach — Micrometer API with OTLP export (`micrometer-registry-otlp`) — gives the best of both worlds: familiar Spring APIs with OpenTelemetry protocol and backend flexibility. *(Section 20)*
 
 **Q10: How would you handle metrics in a multi-tenant SaaS application?**
 
@@ -2194,11 +2524,11 @@ rate(hikaricp_connections_timeout_total[5m]) > 0
 
 **Q12: Your Grafana dashboard shows P99 latency as NaN. What's wrong?**
 
-**A**: `histogram_quantile()` returns NaN when there are no data points in the histogram buckets within the query range. Common causes: (1) The metric was just created and not enough scrapes have occurred. (2) The `rate()` time range is too narrow — widen from `[5m]` to `[15m]`. (3) The histogram buckets don't cover the actual latency range — check `minimumExpectedValue` / `maximumExpectedValue`. (4) No traffic to the endpoint in the query window. Fix: filter out NaN with `> 0`, widen time range, and ensure histogram clamping matches your actual latency distribution. *(Section 24)*
+**A**: `histogram_quantile()` returns NaN when there are no data points in the histogram buckets within the query range. Common causes: (1) The metric was just created and not enough scrapes have occurred. (2) The `rate()` time range is too narrow — widen from `[5m]` to `[15m]`. (3) The histogram buckets don't cover the actual latency range — check `minimumExpectedValue` / `maximumExpectedValue`. (4) No traffic to the endpoint in the query window. Fix: filter out NaN with `> 0`, widen time range, and ensure histogram clamping matches your actual latency distribution. *(Section 25)*
 
 **Q13: After deploying a new version, your order count drops to zero in Grafana. Customers are still ordering. What happened?**
 
-**A**: Counters reset to 0 on application restart. If the dashboard uses raw counter values instead of `rate()` or `increase()`, it shows the raw value which restarted at 0. `rate()` and `increase()` automatically handle counter resets by detecting the decrease and adjusting. Fix: always use `rate()` or `increase()` for counter metrics in PromQL; never display raw counter values. *(Section 24)*
+**A**: Counters reset to 0 on application restart. If the dashboard uses raw counter values instead of `rate()` or `increase()`, it shows the raw value which restarted at 0. `rate()` and `increase()` automatically handle counter resets by detecting the decrease and adjusting. Fix: always use `rate()` or `increase()` for counter metrics in PromQL; never display raw counter values. *(Section 25)*
 
 **Q14: Your Spring Boot app has 500 endpoints and Prometheus scrape takes 30 seconds, causing timeouts. How do you reduce metric cardinality?**
 
@@ -2214,11 +2544,11 @@ rate(hikaricp_connections_timeout_total[5m]) > 0
 
 **Q16: Walk me through how a metric goes from your Java code to a Grafana panel.**
 
-**A**: (1) Code calls `counter.increment()` → updates an in-memory `AtomicLong` in the `PrometheusMeterRegistry`. (2) Every 15s, Prometheus HTTP-scrapes `/actuator/prometheus` on the management port. (3) The registry serializes all meters to Prometheus text exposition format (`metric_name{labels} value timestamp`). (4) Prometheus stores the data in its local TSDB as time-series. (5) Grafana queries Prometheus via PromQL, e.g., `rate(orders_created_total[5m])`. (6) Grafana renders the query result as a time-series panel, stat panel, or gauge visualization. (7) If an alert rule is configured, Prometheus evaluates it every `evaluation_interval` and fires to Alertmanager if the condition holds for the `for` duration. *(Sections 6, 16, 17, 18)*
+**A**: (1) Code calls `counter.increment()` → updates an in-memory `AtomicLong` in the `PrometheusMeterRegistry`. (2) Every 15s, Prometheus HTTP-scrapes `/actuator/prometheus` on the management port. (3) The registry serializes all meters to Prometheus text exposition format (`metric_name{labels} value timestamp`). (4) Prometheus stores the data in its local TSDB as time-series. (5) Grafana queries Prometheus via PromQL, e.g., `rate(orders_created_total[5m])`. (6) Grafana renders the query result as a time-series panel, stat panel, or gauge visualization. (7) If an alert rule is configured, Prometheus evaluates it every `evaluation_interval` and fires to Alertmanager if the condition holds for the `for` duration. *(Sections 6, 16, 17, 18, 19)*
 
 **Q17: How do you test metrics in a Spring Boot application?**
 
-**A**: Unit tests use `SimpleMeterRegistry` — an in-memory registry that doesn't export. Inject it into the component under test, execute logic, then assert against `registry.find("metric.name").counter().count()`. Integration tests use `@SpringBootTest` with `@AutoConfigureMetrics`; call `registry.clear()` in `@AfterEach` to prevent state leaking between tests. For MeterFilter tests, create a `SimpleMeterRegistry`, configure the filter, register a metric, and assert the transformation. I also validate metrics in staging by checking `/actuator/prometheus` output before production deploy. *(Section 21)*
+**A**: Unit tests use `SimpleMeterRegistry` — an in-memory registry that doesn't export. Inject it into the component under test, execute logic, then assert against `registry.find("metric.name").counter().count()`. Integration tests use `@SpringBootTest` with `@AutoConfigureMetrics`; call `registry.clear()` in `@AfterEach` to prevent state leaking between tests. For MeterFilter tests, create a `SimpleMeterRegistry`, configure the filter, register a metric, and assert the transformation. I also validate metrics in staging by checking `/actuator/prometheus` output before production deploy. *(Section 22)*
 
 **Q18: What is a MeterBinder and when would you use it over direct MeterRegistry injection?**
 
@@ -2226,11 +2556,11 @@ rate(hikaricp_connections_timeout_total[5m]) > 0
 
 **Q19: Explain the difference between rate(), irate(), and increase() in PromQL.**
 
-**A**: `rate()` calculates the per-second average rate over the full time window — smooth trends, ideal for dashboards and alerting. `irate()` uses only the last two data points for an instantaneous rate — shows real-time spikes but is noisy and not suitable for alerting. `increase()` is syntactic sugar for `rate() * window_seconds` — shows the total increase as a human-readable number ("500 requests in the last 5 minutes"). Always use `rate()` for alerting, `rate()` for dashboards, `irate()` for real-time debugging, and `increase()` for human-readable totals. All three handle counter resets gracefully. *(Section 17)*
+**A**: `rate()` calculates the per-second average rate over the full time window — smooth trends, ideal for dashboards and alerting. `irate()` uses only the last two data points for an instantaneous rate — shows real-time spikes but is noisy and not suitable for alerting. `increase()` is syntactic sugar for `rate() * window_seconds` — shows the total increase as a human-readable number ("500 requests in the last 5 minutes"). Always use `rate()` for alerting, `rate()` for dashboards, `irate()` for real-time debugging, and `increase()` for human-readable totals. All three handle counter resets gracefully. *(Section 18)*
 
 **Q20: How do you expose metrics securely in a Kubernetes environment?**
 
-**A**: (1) **Separate management port** (8081) — application traffic on 8080. (2) **NetworkPolicy** — allow only Prometheus pods to reach port 8081. (3) **ServiceMonitor** with explicit `endpoints[].port: management`. (4) `show-details: never` on health endpoint publicly. (5) Only expose `health` and `prometheus` endpoints — never `env`, `heapdump`, `threaddump` in production. (6) If using Istio, exclude the management port from the mesh or configure mTLS between Prometheus and pods. (7) RBAC-scoped `loggers` endpoint if runtime log level changes are needed. *(Section 22)*
+**A**: (1) **Separate management port** (8081) — application traffic on 8080. (2) **NetworkPolicy** — allow only Prometheus pods to reach port 8081. (3) **ServiceMonitor** with explicit `endpoints[].port: management`. (4) `show-details: never` on health endpoint publicly. (5) Only expose `health` and `prometheus` endpoints — never `env`, `heapdump`, `threaddump` in production. (6) If using Istio, exclude the management port from the mesh or configure mTLS between Prometheus and pods. (7) RBAC-scoped `loggers` endpoint if runtime log level changes are needed. *(Section 23)*
 
 ---
 
@@ -2303,7 +2633,11 @@ In Grafana, use value mappings: 0="CLOSED" (green), 1="HALF_OPEN" (yellow), 2="O
 job:http_error_ratio:rate5m{version="v2"} > 2 * job:http_error_ratio:rate5m{version="v1"}
 ```
 
-(4) Alert if canary error rate exceeds 2x the stable rate for 5 minutes. (5) Alert if canary P99 latency exceeds 1.5x the stable P99. (6) Use Argo Rollouts or Flagger to automate the decision: promote if within bounds, rollback if not. (7) Include business metrics: canary `orders.created.total` rate shouldn't be significantly lower than expected based on traffic split.
+(4) Alert if canary error rate exceeds 2x the stable rate for 5 minutes. (5) Alert if canary P99 latency exceeds 1.5x the stable P99. (6) Use Argo Rollouts or Flagger to automate the decision: promote if within bounds, rollback if not. (7) Include business metrics: canary `orders.created.total` rate shouldn't be significantly lower than expected based on traffic split. *(Sections 5, 19)*
+
+**Q31: How do you expose a custom metric from Spring Boot? Do you create a new endpoint?**
+
+**A**: No separate endpoint per metric. Register with Micrometer (`Counter.builder("orders.placed.total").register(registry)`), call `.increment()` or `.record()` in business code, and the metric automatically appears on `/actuator/prometheus`. Verify with `curl /actuator/prometheus | grep orders_placed`. Requires `spring-boot-starter-actuator` + `micrometer-registry-prometheus` + exposing the `prometheus` endpoint in `application.yml`. Prometheus scrapes `/actuator/prometheus` — not `/actuator/metrics` (JSON is for debugging only). *(Section 16)*
 
 ---
 
@@ -2440,6 +2774,68 @@ With traces I can find the exact slow step. Metrics tell me which service or com
 
 ---
 
+### "What is the difference between Micrometer and Prometheus?"
+
+Micrometer lives inside your Java app. It creates and holds the metrics.
+
+Prometheus is a separate server. It comes to your app, pulls the metrics, stores them, and lets you query and alert on them.
+
+So Micrometer is the producer. Prometheus is the collector and database. You usually use both together.
+
+---
+
+### "What is a starter vs a regular dependency?"
+
+Both go in pom.xml. A starter bundles multiple libraries and turns on auto-configuration.
+
+`spring-boot-starter-actuator` is a starter — it brings actuator and Micrometer and sets up health and metrics endpoints.
+
+`micrometer-registry-prometheus` is a normal dependency — it only adds Prometheus export format.
+
+---
+
+### "How do you expose custom metrics from Spring Boot?"
+
+You don't create a new endpoint for each metric.
+
+You register the metric in code with Micrometer — Counter, Timer, or Gauge. When your business logic runs, you call increment or record. The metric automatically shows up on `/actuator/prometheus`. Prometheus scrapes that one endpoint.
+
+To verify: `curl /actuator/prometheus | grep your_metric_name`
+
+---
+
+### "What Prometheus endpoint does Spring Boot expose?"
+
+Main one: `/actuator/prometheus` — Prometheus scrapes this.
+
+For debugging: `/actuator/metrics` shows metric names in JSON.
+
+For health checks: `/actuator/health`
+
+In production I only expose health and prometheus. Not env or heapdump — those are sensitive.
+
+---
+
+### "What is TSDB?"
+
+TSDB means Time Series Database. It stores values with timestamps.
+
+Prometheus uses a TSDB. The four metric types are Counter, Gauge, Histogram, and Summary.
+
+Counter counts events. Gauge is a current value. Histogram tracks distribution like latency. Summary is less common — Histogram is preferred in production.
+
+---
+
+### "I use Kibana for logs — where do metrics go?"
+
+Kibana is for logs. Metrics often go to Prometheus and Grafana separately.
+
+Many teams run both: logs in Kibana, metrics in Grafana. They connect through traceId in logs and traces.
+
+If your company uses full Elastic Observability, metrics might also be in Kibana under Observability. Ask your team which setup you have.
+
+---
+
 ### Quick Answers
 
 | Question | Say this |
@@ -2450,4 +2846,10 @@ With traces I can find the exact slow step. Metrics tell me which service or com
 | What is Micrometer? | A wrapper so your metric code works with any monitoring tool |
 | What is an SLO? | Your reliability target — like 99.9% success rate |
 | What is p99 latency? | 99% of requests finish faster than this — 1% are slower |
+| Micrometer vs Prometheus? | Micrometer creates metrics in the app. Prometheus collects and stores them |
+| Starter vs dependency? | Starter bundles libs + auto-config. Dependency is one specific library |
+| How to expose custom metrics? | Register with Micrometer in code — appears on /actuator/prometheus automatically |
+| Main Prometheus endpoint? | /actuator/prometheus — Prometheus scrapes this every 15s |
+| What is TSDB? | Time Series Database — stores metric values with timestamps |
+| Kibana vs Prometheus? | Kibana for logs. Prometheus + Grafana for metrics — often used together |
 

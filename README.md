@@ -13,6 +13,8 @@ This repository is a practical, interview-grade learning track for distributed s
 7. Bulkhead
 8. Strangler Fig
 
+**Distributed transactions:** [Two-Phase Commit (2PC)](docs/two-phase-commit-2pc.md) — how 2PC works, pros/cons in microservices, and why Saga is the usual alternative.
+
 ## Repository Structure
 
 - `docs/`: deep explanations, tradeoffs, edge cases, and production pitfalls

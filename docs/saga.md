@@ -2,6 +2,8 @@
 
 **Expert playbook:** [`docs/saga-expert-playbook.md`](saga-expert-playbook.md) — full lead/architect depth (orchestration, idempotency, outbox, 35+ interview Q&A).
 
+**Background on 2PC:** [`docs/two-phase-commit-2pc.md`](two-phase-commit-2pc.md) — how two-phase commit works and why microservices usually avoid it.
+
 ## Problem
 
 You need one business transaction to span multiple services, each with its own database.

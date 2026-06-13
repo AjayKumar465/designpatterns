@@ -38,6 +38,7 @@ This repository is a practical, interview-grade learning track for distributed s
 | Custom Spring Boot Starter | [`docs/custom-spring-boot-starter-expert-playbook.md`](docs/custom-spring-boot-starter-expert-playbook.md) | `examples/custom-spring-boot-starter/` |
 | Circuit Breaker | [`docs/circuit-breaker-expert-playbook.md`](docs/circuit-breaker-expert-playbook.md) | `examples/circuit-breaker/CircuitBreakerDemo.java` |
 | Bulkhead | [`docs/bulkhead-expert-playbook.md`](docs/bulkhead-expert-playbook.md) | `examples/bulkhead/BulkheadDemo.java` |
+| Kubernetes | [`docs/kubernetes-expert-playbook.md`](docs/kubernetes-expert-playbook.md) | — |
 
 ### Pattern summaries (quick reference)
 
@@ -81,6 +82,10 @@ This repository is a practical, interview-grade learning track for distributed s
 - Short doc: `docs/bulkhead.md`
 - Expert playbook: `docs/bulkhead-expert-playbook.md`
 - Run: `javac examples/bulkhead/BulkheadDemo.java && java -cp examples/bulkhead BulkheadDemo`
+
+8. Kubernetes (revision & interviews)
+- Expert playbook: `docs/kubernetes-expert-playbook.md`
+- Covers: architecture, networking, storage, probes, autoscaling, security, 5-layer debugging, 30+ prod scenarios, Spring Boot on K8s, 42 interview Q&A
 
 ## Design Goal
 

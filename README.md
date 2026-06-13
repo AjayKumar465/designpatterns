@@ -21,9 +21,33 @@ This repository is a practical, interview-grade learning track for distributed s
 - `examples/`: runnable Java examples (happy path + failure path + compensation/recovery behavior)
 - `templates/`: reusable building blocks for future patterns
 
+## Java Lead Revision Track (recommended order)
+
+Start here before lead/architect interviews — then dive into pattern-specific playbooks.
+
+| # | Playbook | Purpose |
+|---|----------|---------|
+| 1 | [`docs/java-system-design-revision-playbook.md`](docs/java-system-design-revision-playbook.md) | **Revision map** — which pattern when; ties all playbooks together |
+| 2 | [`docs/spring-boot-production-revision-playbook.md`](docs/spring-boot-production-revision-playbook.md) | Transactions, JPA, Actuator, config, testing in prod |
+| 3 | [`docs/postgresql-jpa-revision-playbook.md`](docs/postgresql-jpa-revision-playbook.md) | PostgreSQL + JPA/Hibernate — indexes, pools, migrations, locking |
+| 4 | [`docs/jvm-performance-revision-playbook.md`](docs/jvm-performance-revision-playbook.md) | GC, memory, profiling, OOM on K8s |
+
+Then: Saga → Outbox → CQRS → Kafka → Circuit Breaker → Bulkhead → Kubernetes → Metrics.
+
 ## Current Patterns Implemented
 
 ### Expert Playbooks (Lead/Architect — full depth)
+
+#### Java Lead Revision Track (start here)
+
+| # | Playbook | Purpose |
+|---|----------|---------|
+| 1 | [`docs/java-system-design-revision-playbook.md`](docs/java-system-design-revision-playbook.md) | Revision map — which pattern when |
+| 2 | [`docs/spring-boot-production-revision-playbook.md`](docs/spring-boot-production-revision-playbook.md) | Spring Boot 3 in production |
+| 3 | [`docs/postgresql-jpa-revision-playbook.md`](docs/postgresql-jpa-revision-playbook.md) | PostgreSQL + JPA/Hibernate |
+| 4 | [`docs/jvm-performance-revision-playbook.md`](docs/jvm-performance-revision-playbook.md) | JVM tuning, GC, profiling |
+
+#### Distributed systems & platform
 
 | Pattern | Expert playbook | Runnable example |
 |---|---|---|

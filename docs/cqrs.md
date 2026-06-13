@@ -1,5 +1,7 @@
 # CQRS Pattern: Production Playbook
 
+**Expert playbook:** [`docs/cqrs-expert-playbook.md`](cqrs-expert-playbook.md) — full lead/architect depth (projectors, read-your-writes, rebuild, 35+ interview Q&A).
+
 ## What CQRS Means
 
 CQRS stands for Command Query Responsibility Segregation.

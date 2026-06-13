@@ -1,5 +1,7 @@
 # Transactional Outbox Pattern: Production Playbook
 
+**Expert playbook:** [`docs/outbox-expert-playbook.md`](outbox-expert-playbook.md) — full lead/architect depth (CDC, relay, idempotency, 30+ interview Q&A).
+
 ## Why This Pattern Exists
 
 Any service that both writes local state and publishes an event has a dual-write problem.

@@ -1,5 +1,7 @@
 # Saga Pattern (Distributed Transaction Without 2PC)
 
+**Expert playbook:** [`docs/saga-expert-playbook.md`](saga-expert-playbook.md) — full lead/architect depth (orchestration, idempotency, outbox, 35+ interview Q&A).
+
 ## Problem
 
 You need one business transaction to span multiple services, each with its own database.
